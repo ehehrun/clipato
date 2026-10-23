@@ -1,0 +1,6 @@
+{
+  "version": "0.1.0",
+  "build": 3,
+  "downloadURL": "https://example.com/clipato/download",
+  "releaseNotes": "增加统一版本号和检查更新功能。"
+}

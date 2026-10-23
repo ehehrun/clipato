@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clipato"
+  short_description: "Capture screens and process local media with Clipato"
+  default_prompt: "使用 $clipato 按我的要求处理本机图片，先说明输入、输出和必要的操作预览。"

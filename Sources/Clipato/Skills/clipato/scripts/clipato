@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+
+clipato_executable=__CLIPATO_EXECUTABLE__
+
+if [[ ! -x "$clipato_executable" ]]; then
+    printf 'Clipato executable is unavailable: %s\n' "$clipato_executable" >&2
+    printf '%s\n' 'Reopen Clipato.app from its current location, then reinstall this skill from AI Terminal.' >&2
+    exit 127
+fi
+
+exec "$clipato_executable" "$@"

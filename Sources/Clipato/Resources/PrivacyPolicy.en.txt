@@ -1,0 +1,57 @@
+Clipato Privacy Notice
+
+Release draft · Reviewed against the current code on October 23, 2026
+
+This notice is available inside the app without an internet connection. It is a release preparation draft, not a published privacy-policy URL. Before public release, the operator and privacy contact must be identified, update-host access-log practices must be verified, and the final notice must be published at a public HTTPS address. App Store privacy answers must be checked against the final release and its services.
+
+1. Screen content and local processing
+
+Clipato captures screenshots and screen recordings only when a capture operation is started through the app or an authorized local automation call. macOS Screen Recording permission is required. The screen may include personal or confidential information visible in other apps. Select the capture area carefully.
+
+Clipato captures images only. It does not capture system audio or microphone input and does not request microphone or camera access. Recording status and controls are shown while recording.
+
+The app processes images, keyframes, videos, thumbnails, duplicate and similar-image comparisons, and text selection on the Mac. The current app contains no built-in account service, advertising SDK, analytics SDK, or automatic upload of screen content, vault files, or access logs to the developer. This does not control sharing by other apps, operating-system services, or a client you choose to use.
+
+2. Saved files, history, and clipboard
+
+Screenshots normally enter the local vault. Recordings, exports, collections, names, tags, media metadata, thumbnails, and recent pinned-image history are stored locally. You may choose other save locations. The existing default vault keeps its legacy FrameVault folder name for compatibility; this does not send data to a separate service.
+
+Copying an image, color value, command, or configuration writes it to the macOS clipboard when you request that action. Other apps, clipboard managers, and system clipboard features may access or retain clipboard contents under their own settings. Clipato does not clear those other copies.
+
+Media and logs are ordinary local files; Clipato does not separately encrypt them. File permissions and the Mac's storage protections apply. Files exported to shared folders, synchronized locations, or backups follow those locations' own access and retention rules.
+
+3. Optional external automation
+
+In the independent distribution, Skills, CLI operations, and MCP are optional and disabled by default. The external automation switch permits local business operations. MCP also requires its separate service switch. MCP uses local standard input and output; Clipato does not open a network listening port for it.
+
+Once enabled, a local client can request screen capture, vault access, and image processing within the available tools. Tool results, paths, and requested content are returned to that client. A client such as an AI assistant may send information to its own service. Review the client's permissions and privacy policy before enabling or invoking it. Clipato cannot control that client's storage, cloud processing, or deletion of copies it receives.
+
+Turning off the external automation switch revokes existing authorization, disables MCP, and cancels active external tasks. Turning off MCP alone cancels MCP tasks while authorized Skills and CLI operations remain available. Completed writes cannot be undone by revoking access. Trash operations require a separate opt-in and confirmation for each batch. Caller process information is diagnostic evidence, not verified client identity or protection against malicious code running with your own user permissions.
+
+Some distribution channels may omit external automation. The controls and capabilities present in the installed edition determine availability.
+
+4. Local access logs
+
+In editions with external automation, Clipato records MCP and CLI activity in local access logs, including original arguments or JSON parameters, timestamps, status, duration, selected asset references, and available caller process information. Process information may include executable and application paths, process names, bundle identifiers, and parent processes. MCP client names and versions are supplied by the client itself. Logs do not read image-file content or save complete tool responses. Parameters can still contain sensitive text, filenames, or paths supplied by the caller.
+
+CLI entry attempts, help, diagnostics, invalid commands, and denied calls can also be logged. Turning off automation or enabling Privacy Mode does not erase existing logs and does not suppress all denied-call logging. Logs are not uploaded by Clipato. The default combined limit is 20 MB, configurable from 1 to 1024 MB. The active file and up to three rotated files share this limit; older files are removed when necessary during log activity or when the limit changes.
+
+The access-log location is shown under AI Terminal → Access Log. Vault cleanup does not delete these log files. If you need to remove them manually, first stop the external clients that may write logs and quit Clipato, then remove the active and rotated files at the displayed location. A subsequent CLI attempt or opening the log settings can create a new log file.
+
+5. Update checks and network requests
+
+The independent distribution checks its built-in HTTPS update sources when you choose Check for Updates. It does not include screenshots, vault contents, access logs, a device identifier, or a custom user identifier in that request. The update connection does not use a cookie store, credential store, or response cache. The server and its hosting providers can still see the source IP address and ordinary HTTPS request metadata; their access-log retention must be confirmed before this notice is finalized.
+
+Clipato permits up to five actual update HTTP requests per local calendar day, including failed requests, mirrors, and redirects. It stores the request count, day, and last successful update manifest locally. After the limit is reached, it displays the cached result. Choosing the download action opens the release address in your browser, whose own data practices then apply. App Store editions receive updates through the App Store instead of this external update mechanism.
+
+6. Privacy Mode and deletion
+
+Privacy Mode prevents automatic screenshot saving to the vault and new pinned-image history. It disables external automation and MCP, and they remain off after Privacy Mode is turned off until you enable them again. Privacy Mode does not erase existing files or logs, prevent recording files or explicit exports you request, clear the system clipboard, or guarantee that no temporary files will be created. It is not secure erasure or a network-wide privacy control.
+
+System Settings → Data Cleanup lets you select vault images, recordings, collections, and operation history. Images and recordings move to the system Trash; the chosen collection relationships and recent pinned-image records are removed. Collections and history cannot be restored inside the app. Cleanup also clears app thumbnails, but preserves settings, update metadata, and access logs. Exported copies, original imported files, backups, and copies held by other apps are not removed. Files in the Trash remain until the Trash is emptied under macOS rules.
+
+You may revoke Screen Recording permission in macOS System Settings, disable launch at login, turn off external automation, and manage saved files at any time. No Clipato account is required or available in the current release.
+
+7. Changes and privacy contact
+
+The notice must be updated when Clipato's data handling or services change. The release operator's identity, privacy contact, public policy URL, and any verified hosting retention terms must be completed before this draft is used for public distribution. No contact address or hosted URL has been configured in this draft.
