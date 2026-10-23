@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "clipato",
+  "compatibility_date": "2026-10-23",
+  "workers_dev": true,
+  "send_metrics": false,
+  "upload_source_maps": false,
+  "assets": {
+    "directory": "./dist"
+  }
+}
