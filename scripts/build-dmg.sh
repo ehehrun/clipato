@@ -13,9 +13,9 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || fail '--arch 需要 arm64 或 x86_64。'
             target_arch="$2"; shift 2 ;;
         --channel)
-            [ "$#" -ge 2 ] || fail '--channel 需要 development 或 direct。'
+            [ "$#" -ge 2 ] || fail '--channel 需要 development、direct 或 adhoc。'
             channel="$2"; shift 2 ;;
-        *) fail '用法：build-dmg.sh [--arch arm64|x86_64] [--channel development|direct]' ;;
+        *) fail '用法：build-dmg.sh [--arch arm64|x86_64] [--channel development|direct|adhoc]' ;;
     esac
 done
 case "$target_arch" in
@@ -23,8 +23,8 @@ case "$target_arch" in
     *) fail "未支持的架构：$target_arch，只支持 arm64 或 x86_64。" ;;
 esac
 case "$channel" in
-    development|direct) ;;
-    *) fail 'DMG 仅用于 development 或 direct 渠道；App Store 使用商店归档。' ;;
+    development|direct|adhoc) ;;
+    *) fail 'DMG 仅用于 development、direct 或 adhoc 渠道；App Store 使用商店归档。' ;;
 esac
 
 mkdir -p "$project_dir/.build"

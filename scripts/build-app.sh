@@ -13,7 +13,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --stage-only) stage_only=true; shift ;;
         --channel)
-            [ "$#" -ge 2 ] || fail '--channel 需要 development、direct 或 app-store。'
+            [ "$#" -ge 2 ] || fail '--channel 需要 development、direct、adhoc 或 app-store。'
             channel="$2"
             shift 2
             ;;
@@ -23,7 +23,7 @@ while [ "$#" -gt 0 ]; do
             target_arch="$2"
             shift 2
             ;;
-        *) fail '用法：build-app.sh [--stage-only] [--arch arm64|x86_64] [--channel development|direct|app-store] [--development-signing]' ;;
+        *) fail '用法：build-app.sh [--stage-only] [--arch arm64|x86_64] [--channel development|direct|adhoc|app-store] [--development-signing]' ;;
     esac
 done
 case "$target_arch" in
@@ -31,8 +31,8 @@ case "$target_arch" in
     *) fail "未支持的架构：$target_arch，只支持 arm64 或 x86_64。" ;;
 esac
 case "$channel" in
-    development|direct|app-store) ;;
-    *) fail '发行渠道必须为 development、direct 或 app-store。' ;;
+    development|direct|adhoc|app-store) ;;
+    *) fail '发行渠道必须为 development、direct、adhoc 或 app-store。' ;;
 esac
 if "$development_signing" && [ "$channel" != app-store ]; then
     fail '--development-signing 仅用于 app-store 沙盒预检。'
@@ -40,6 +40,10 @@ fi
 if [ "$channel" = app-store ]; then
     "$stage_only" || fail '商店沙盒预检必须使用 --stage-only，不能替换现有应用。'
     "$development_signing" || fail '商店渠道当前提供 --development-signing 沙盒预检；正式 Store 归档还需配置 Apple Distribution 证书及描述文件。'
+fi
+if [ "$channel" = adhoc ]; then
+    "$stage_only" || fail 'ad hoc 测试构建必须使用 --stage-only，不能替换现有稳定签名应用。'
+    printf '%s\n' 'Clipato build: ad hoc 测试构建未经 Apple 公证，升级后可能需要重新授予屏幕录制权限。' >&2
 fi
 
 require_application_stopped() {
@@ -52,29 +56,33 @@ require_application_stopped() {
 }
 
 identity_file="$project_dir/.build/framevault-signing-identity"
-signing_identity="${FRAMEVAULT_SIGNING_IDENTITY-}"
-if [ "${FRAMEVAULT_SIGNING_IDENTITY+x}" = x ]; then
-    [[ "$signing_identity" =~ ^[0-9A-Fa-f]{40}$ ]] || fail 'FRAMEVAULT_SIGNING_IDENTITY 必须是签名证书的 40 位 SHA-1 指纹。'
-elif [ "$channel" != direct ] && [ -f "$identity_file" ]; then
-    signing_identity="$(cat "$identity_file")"
-    [[ "$signing_identity" =~ ^[0-9A-Fa-f]{40}$ ]] || fail '已保存的签名指纹无效，请显式设置 FRAMEVAULT_SIGNING_IDENTITY。'
-fi
-
-if ! identities="$(security find-identity -v -p codesigning)"; then
-    fail '无法读取代码签名身份；请从有钥匙串访问权限的终端运行构建。'
-fi
-identity_kind='Apple Development:'
-if [ "$channel" = direct ]; then identity_kind='Developer ID Application:'; fi
-eligible_identities="$(printf '%s\n' "$identities" | awk -v kind="\"$identity_kind" 'index($0, kind) { print toupper($2) }' | LC_ALL=C sort -u)"
-if [ -z "$eligible_identities" ]; then
-    fail "当前进程未取得可用的 $identity_kind 签名身份，不能构建 $channel 渠道。"
-fi
-if [ -z "$signing_identity" ]; then
-    signing_identity="$(printf '%s\n' "$eligible_identities" | sed -n '1p')"
+if [ "$channel" = adhoc ]; then
+    signing_identity=-
 else
-    signing_identity="$(printf '%s' "$signing_identity" | tr '[:lower:]' '[:upper:]')"
+    signing_identity="${FRAMEVAULT_SIGNING_IDENTITY-}"
+    if [ "${FRAMEVAULT_SIGNING_IDENTITY+x}" = x ]; then
+        [[ "$signing_identity" =~ ^[0-9A-Fa-f]{40}$ ]] || fail 'FRAMEVAULT_SIGNING_IDENTITY 必须是签名证书的 40 位 SHA-1 指纹。'
+    elif [ "$channel" != direct ] && [ -f "$identity_file" ]; then
+        signing_identity="$(cat "$identity_file")"
+        [[ "$signing_identity" =~ ^[0-9A-Fa-f]{40}$ ]] || fail '已保存的签名指纹无效，请显式设置 FRAMEVAULT_SIGNING_IDENTITY。'
+    fi
+
+    if ! identities="$(security find-identity -v -p codesigning)"; then
+        fail '无法读取代码签名身份；请从有钥匙串访问权限的终端运行构建。'
+    fi
+    identity_kind='Apple Development:'
+    if [ "$channel" = direct ]; then identity_kind='Developer ID Application:'; fi
+    eligible_identities="$(printf '%s\n' "$identities" | awk -v kind="\"$identity_kind" 'index($0, kind) { print toupper($2) }' | LC_ALL=C sort -u)"
+    if [ -z "$eligible_identities" ]; then
+        fail "当前进程未取得可用的 $identity_kind 签名身份，不能构建 $channel 渠道。"
+    fi
+    if [ -z "$signing_identity" ]; then
+        signing_identity="$(printf '%s\n' "$eligible_identities" | sed -n '1p')"
+    else
+        signing_identity="$(printf '%s' "$signing_identity" | tr '[:lower:]' '[:upper:]')"
+    fi
+    printf '%s\n' "$eligible_identities" | grep -Fqx "$signing_identity" || fail "指定或已缓存的身份不是可用的 $identity_kind 证书；请显式选择有效 SHA-1 指纹。"
 fi
-printf '%s\n' "$eligible_identities" | grep -Fqx "$signing_identity" || fail "指定或已缓存的身份不是可用的 $identity_kind 证书；请显式选择有效 SHA-1 指纹。"
 
 production_dir="$project_dir/.build/production/$target_arch"
 if [ "$channel" != development ]; then production_dir="$project_dir/.build/production/$channel/$target_arch"; fi
@@ -143,10 +151,12 @@ if [ "$channel" = direct ]; then sign_options+=(--timestamp); fi
 if [ "$channel" = app-store ]; then sign_options+=(--entitlements "$project_dir/Resources/Clipato-AppStore.entitlements"); fi
 codesign "${sign_options[@]}" "$stage_app"
 codesign --verify --strict --verbose=2 "$stage_app"
-requirements="$(codesign --display -r- "$stage_app" 2>&1)"
-case "$requirements" in
-    *'cdhash '*) fail '签名仍以构建哈希作为指定要求，无法稳定保留屏幕录制授权。' ;;
-esac
+if [ "$channel" != adhoc ]; then
+    requirements="$(codesign --display -r- "$stage_app" 2>&1)"
+    case "$requirements" in
+        *'cdhash '*) fail '签名仍以构建哈希作为指定要求，无法稳定保留屏幕录制授权。' ;;
+    esac
+fi
 printf '%s\n' "$signing_identity" > "$stage_dir/signing-identity"
 codesign --display --entitlements - --xml "$stage_app" > "$stage_dir/entitlements.plist"
 if [ -s "$stage_dir/entitlements.plist" ]; then

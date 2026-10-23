@@ -78,6 +78,9 @@ final class PinnedMousePassthroughTests: XCTestCase {
     }
 
     func testEnablingPassthroughReleasesThePinnedKeyWindow() throws {
+        guard ProcessInfo.processInfo.environment["CLIPATO_PINNED_NATIVE_QA"] == "1" else {
+            throw XCTSkip("Set CLIPATO_PINNED_NATIVE_QA=1 in an interactive AppKit session to exercise real pinned-window keyboard focus")
+        }
         _ = NSApplication.shared
         let screenshots = ScreenshotController()
         let panel = screenshots.pin(image: try pixels(), frame: offscreenFrame)
