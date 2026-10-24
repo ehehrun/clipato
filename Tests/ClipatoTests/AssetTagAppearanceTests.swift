@@ -46,17 +46,17 @@ final class AssetTagAppearanceTests: XCTestCase {
     func testNativePickerCheckmarkTracksProgrammaticAndUserSelections() {
         _ = NSApplication.shared
         let picker = NativeAssetTagPicker()
-        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), ["无标签"])
+        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), [L("无标签")])
         picker.assetTag = .green
-        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), ["绿色"])
+        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), [AssetTag.green.title])
         var changes: [AssetTag?] = []
         picker.onChange = { changes.append($0) }
-        picker.selectItem(withTitle: "红色")
+        picker.selectItem(withTitle: AssetTag.red.title)
         XCTAssertTrue(picker.sendAction(picker.action, to: picker.target))
-        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), ["红色"])
+        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), [AssetTag.red.title])
         XCTAssertEqual(changes, [.red])
         picker.assetTag = nil
-        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), ["无标签"])
+        XCTAssertEqual(picker.itemArray.filter { $0.state == .on }.map(\.title), [L("无标签")])
         XCTAssertEqual(changes, [.red])
     }
 }

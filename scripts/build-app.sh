@@ -91,7 +91,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$production_dir/module-cache"
 build_options=(--disable-sandbox --scratch-path "$production_dir" -c release --arch "$target_arch")
 if [ "$channel" = app-store ]; then build_options+=(-Xswiftc -DAPP_STORE); fi
 swift build "${build_options[@]}" --product Clipato \
-    -Xlinker -exported_symbol -Xlinker _main
+    -Xlinker -no_exported_symbols
 binary_dir="$(swift build "${build_options[@]}" --show-bin-path)"
 app_dir="$project_dir/dist/Clipato.app"
 mkdir -p "$project_dir/dist"
@@ -136,9 +136,10 @@ xcrun strip -u -r "$stage_executable"
 stripped_uuid="$(xcrun dwarfdump --uuid "$stage_executable" | awk '{ print $2 }')"
 [ "$binary_uuid" = "$stripped_uuid" ] || fail '剥离符号后可执行文件 UUID 发生变化。'
 exports="$(xcrun nm --dyldinfo-only --defined-only --extern-only -j "$stage_executable")"
+# Some Apple linkers retain this Mach-O header marker with -no_exported_symbols.
 case "$exports" in
-    ''|'_main') ;;
-    *) fail '发布可执行文件包含未预期的导出符号。' ;;
+    ''|'__mh_execute_header') ;;
+    *) fail $'发布可执行文件包含未预期的导出符号：\n'"$exports" ;;
 esac
 xcrun nm --no-dyldinfo -ap "$stage_executable" > "$stage_dir/symbols.txt"
 # Apple's strip retains an N_OPT marker for dSYM compatibility, without source records.

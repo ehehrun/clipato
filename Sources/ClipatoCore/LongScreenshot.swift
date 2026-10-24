@@ -259,7 +259,10 @@ public enum LongScreenshot {
             for x in 2..<(contentWidth - 2) {
                 let i = y * width + x
                 let a = Int(p[i]), b = Int(p[i + 1]), c = Int(p[i + width]), d = Int(p[i + width + 1])
-                output[x] = UInt8(min(abs(a - b) + abs(c - d), abs(a - c) + abs(b - d)) / 2)
+                let horizontalDifference: Int = abs(a - b) + abs(c - d)
+                let verticalDifference: Int = abs(a - c) + abs(b - d)
+                let response: Int = min(horizontalDifference, verticalDifference) / 2
+                output[x] = UInt8(response)
             }
         }
         fill(2, &responses[2])

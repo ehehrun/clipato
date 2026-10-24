@@ -260,6 +260,7 @@ final class MCPServerSwitchTests: XCTestCase {
         ], format: .xml, options: 0)
         try info.write(to: contents.appendingPathComponent("Info.plist"))
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defaults.set(LanguageSettings.shared.resolvedLanguage.rawValue, forKey: "language")
         MCPSettings.setEnabled(true, in: defaults)
         addTeardownBlock {
             defaults.removePersistentDomain(forName: name)

@@ -21,7 +21,8 @@ final class AppModelExportTests: XCTestCase {
         XCTAssertFalse(model.exportIsIndeterminate)
         XCTAssertEqual(model.section, .recordings)
         XCTAssertTrue(try XCTUnwrap(model.library).images.isEmpty)
-        XCTAssertTrue(try XCTUnwrap(model.errorMessage).contains("导出到保管箱失败"))
+        let frameError = KeyframeExportError.invalidFrame(session.directory.appendingPathComponent("frame.png"))
+        XCTAssertEqual(model.errorMessage, L("导出到保管箱失败：\(frameError.localizedDescription)"))
         XCTAssertEqual(try Data(contentsOf: session.directory.appendingPathComponent("frame.png")), Data("corrupt PNG".utf8))
     }
 
@@ -40,7 +41,7 @@ final class AppModelExportTests: XCTestCase {
         XCTAssertFalse(model.exportIsIndeterminate)
         XCTAssertTrue(try XCTUnwrap(model.library).images.isEmpty)
         XCTAssertNil(model.errorMessage)
-        XCTAssertEqual(model.notice, "已取消导出")
+        XCTAssertEqual(model.notice, L("已取消导出"))
     }
 
     private func makeModel() throws -> AppModel {

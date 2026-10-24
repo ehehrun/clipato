@@ -30,7 +30,7 @@ final class FixedCapturePipelineTests: XCTestCase {
         model.finishFixedCapture()
         XCTAssertFalse(model.canCaptureFixedRegion)
         model.captureFixedRegion()
-        XCTAssertTrue(model.notice?.contains("正在完成") == true)
+        XCTAssertEqual(model.notice, L("正在完成已接收的截图，请稍候。"))
         await fulfillment(of: [requested[0]], timeout: 3)
         XCTAssertNil(model.longScreenshot)
         waiting[0].resume(returning: frames[0])
@@ -75,10 +75,11 @@ final class FixedCapturePipelineTests: XCTestCase {
 
     func testFailureStopsRemainingQueueReportsMissingRequestsAndKeepsSuccessfulImagesForRetry() async throws {
         let frames = try [40, 80, 120, 160].map { try image(red: UInt8($0)) }
+        let captureError = NSError(domain: "CaptureFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "显示器已断开"])
         var requests = 0
         let model = try makeModel { _, _ in
             requests += 1
-            if requests == 2 { throw NSError(domain: "CaptureFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "显示器已断开"]) }
+            if requests == 2 { throw captureError }
             return frames[requests - 1]
         }
         let stopped = expectation(description: "Failed capture drains no more requests")
@@ -92,8 +93,7 @@ final class FixedCapturePipelineTests: XCTestCase {
         XCTAssertEqual(requests, 2)
         XCTAssertTrue(model.hasFixedCaptures)
         XCTAssertNil(model.longScreenshot)
-        XCTAssertTrue(try XCTUnwrap(model.errorMessage).contains("已保留 1 张截图，2 次请求未完成"))
-        XCTAssertTrue(try XCTUnwrap(model.errorMessage).contains("显示器已断开"))
+        XCTAssertEqual(model.errorMessage, L("连续截图未完成：\(captureError.localizedDescription)\n已保留 \(1) 张截图，\(2) 次请求未完成。可继续截取，或完成已有图片。"))
 
         let ready = expectation(description: "Continue after failure")
         let subscription = model.$longScreenshot.compactMap { $0 }.sink { _ in ready.fulfill() }
@@ -125,18 +125,17 @@ final class FixedCapturePipelineTests: XCTestCase {
         XCTAssertEqual(requests, 1)
         XCTAssertFalse(model.hasFixedCaptures)
         XCTAssertNil(model.longScreenshot)
-        XCTAssertTrue(try XCTUnwrap(model.errorMessage).contains("已保留 0 张截图，3 次请求未完成"))
+        XCTAssertEqual(model.errorMessage, L("连续截图未完成：\(LibraryError.imageWrite.localizedDescription)\n已保留 \(0) 张截图，\(3) 次请求未完成。可继续截取，或完成已有图片。"))
     }
 
     func testPermissionLossPreservesAcceptedImagesAndRecoveryClearsInlineDiagnostic() async throws {
         let frame = try image(red: 80)
+        let denied = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue)
+        let captureError = ScreenCapturePermission.localizedError(denied)
         var requests = 0
         let model = try makeModel { _, _ in
             requests += 1
-            if requests == 2 {
-                let denied = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue)
-                throw ScreenCapturePermission.localizedError(denied)
-            }
+            if requests == 2 { throw captureError }
             return frame
         }
         let region = try XCTUnwrap(model.fixedCaptureRegion)
@@ -155,7 +154,7 @@ final class FixedCapturePipelineTests: XCTestCase {
         XCTAssertEqual(model.section, .security)
         XCTAssertEqual(model.fixedCaptureRegion, region)
         XCTAssertTrue(model.hasFixedCaptures)
-        XCTAssertTrue(try XCTUnwrap(model.screenCapturePermissionError).contains("已保留 1 张截图，2 次请求未完成"))
+        XCTAssertEqual(model.screenCapturePermissionError, L("连续截图未完成：\(captureError.localizedDescription)\n已保留 \(1) 张截图，\(2) 次请求未完成。可继续截取，或完成已有图片。"))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["1.png"])
         XCTAssertNil(model.longScreenshot)
 

@@ -2,14 +2,19 @@ name: Swift · DMG
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
+      channel:
+        description: '发布渠道'
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - nightly
       tag:
-        description: 'Optional existing tag, e.g. v0.1.0. Leave empty to build artifacts only.'
+        description: '现有 tag：Stable 如 v0.1.0，Nightly 如 v0.1.0-nightly.3；留空仅构建附件。'
         required: false
         type: string
 
@@ -28,6 +33,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       build: ${{ steps.version.outputs.build }}
       tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+      local_release: ${{ steps.version.outputs.local_release }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -37,6 +44,7 @@ jobs:
         id: version
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
         run: |
           python3 - <<'PY'
           import os
@@ -48,14 +56,24 @@ jobs:
               return subprocess.check_output(['git', *args])
 
           tag = ''
+          channel = 'stable'
           if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
               tag = os.environ['INPUT_TAG']
+              channel = os.environ['INPUT_CHANNEL']
+              if channel not in ('stable', 'nightly'):
+                  raise SystemExit('Release channel must be stable or nightly.')
           elif os.environ['GITHUB_REF'].startswith('refs/tags/'):
               tag = os.environ['GITHUB_REF'][len('refs/tags/'):]
           number = r'(0|[1-9][0-9]*)'
           version_pattern = rf'{number}\.{number}\.{number}'
-          if tag and not re.fullmatch(rf'v{version_pattern}', tag):
-              raise SystemExit('Release tag must have the form vMAJOR.MINOR.PATCH.')
+          if tag:
+              match = re.fullmatch(rf'v{version_pattern}(?:-nightly\.(?P<nightly_build>[1-9][0-9]*))?', tag)
+              if not match:
+                  raise SystemExit('Release tag must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-nightly.BUILD.')
+              tag_channel = 'nightly' if match['nightly_build'] else 'stable'
+              if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch' and channel != tag_channel:
+                  raise SystemExit(f'Tag {tag} does not match selected channel {channel}.')
+              channel = tag_channel
           ref = f'refs/tags/{tag}^{{commit}}' if tag else 'HEAD'
           sha = git('rev-parse', '--verify', ref).decode().strip()
           info = plistlib.loads(git('show', f'{sha}:Sources/Clipato/Resources/Version.plist'))
@@ -63,15 +81,27 @@ jobs:
           build = info['CFBundleVersion']
           if not re.fullmatch(version_pattern, version) or not re.fullmatch(r'[1-9][0-9]*', build):
               raise SystemExit('Version.plist must contain major.minor.patch and a positive build number.')
-          if tag and tag != f'v{version}':
-              raise SystemExit(f'Tag {tag} does not match Version.plist version {version}.')
+          expected_tag = f'v{version}-nightly.{build}' if channel == 'nightly' else f'v{version}'
+          if tag and tag != expected_tag:
+              raise SystemExit(f'Tag {tag} does not match Version.plist; expected {expected_tag}.')
+          local_release = False
+          if os.environ['GITHUB_EVENT_NAME'] == 'push' and tag:
+              tag_ref = f'refs/tags/{tag}'
+              if git('cat-file', '-t', tag_ref).decode().strip() == 'tag':
+                  annotation = git('cat-file', 'tag', tag_ref).decode().partition('\n\n')[2]
+                  local_release = f'Clipato-Local-Build: {sha}' in annotation.splitlines()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'sha={sha}\nversion={version}\nbuild={build}\ntag={tag}\n')
-          print(f'Clipato {version} ({build}) · {sha} · ad-hoc test build')
+              output.write(f'channel={channel}\n')
+              output.write(f'local_release={str(local_release).lower()}\n')
+          print(f'Clipato {version} ({build}) · {channel.title()} · {sha} · ad-hoc, not notarized')
+          if local_release:
+              print('Local release tag: skipping cloud macOS builds and Release creation.')
           PY
 
   build:
     needs: prepare
+    if: needs.prepare.outputs.local_release != 'true'
     name: DMG · ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
@@ -102,7 +132,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: ./scripts/build-dmg.sh --arch "$ARCH" --channel adhoc
-      - name: Upload test DMG and checksum
+      - name: Upload DMG and checksum
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: clipato-dmg-${{ matrix.arch }}
@@ -113,12 +143,13 @@ jobs:
           retention-days: 14
           compression-level: 0
 
-  draft-release:
-    name: Draft test Release
+  release:
+    name: Release · ${{ needs.prepare.outputs.channel }}
     needs: [prepare, build]
     if: >-
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+      needs.prepare.outputs.local_release != 'true' &&
+      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.tag != ''))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -127,6 +158,7 @@ jobs:
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
       BUILD: ${{ needs.prepare.outputs.build }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
     steps:
       - name: Download both architectures
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -134,7 +166,7 @@ jobs:
           pattern: clipato-dmg-*
           path: release-assets
           merge-multiple: true
-      - name: Verify assets and create draft
+      - name: Verify assets and publish Release
         working-directory: release-assets
         run: |
           assets=()
@@ -144,18 +176,28 @@ jobs:
             sha256sum --check "$image.sha256"
             assets+=("$image" "$image.sha256")
           done
-          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          ## 未公证测试版 / Unnotarized test build
+          release_flags=(--verify-tag)
+          case "$CHANNEL" in
+            stable) channel_name=Stable ;;
+            nightly) channel_name=Nightly; release_flags+=(--prerelease) ;;
+            *) echo "Unknown release channel: $CHANNEL" >&2; exit 1 ;;
+          esac
+          printf '渠道：%s\n\n' "$channel_name" > "$RUNNER_TEMP/release-notes.md"
+          cat >> "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          ## 下载
 
           - **Apple Silicon（M 系列芯片）**：选择文件名以 `-arm64.dmg` 结尾的安装包。
           - **Intel**：选择文件名以 `-x86_64.dmg` 结尾的安装包。
           - 两个版本均要求 **macOS 14 或以上**。
-          - 使用 Release 优化与 ad-hoc 签名，未经过 Developer ID 签名和 Apple 公证。macOS 可能阻止打开；请先在自己的 Mac 上验证此测试包。
-          - ad-hoc 签名不提供稳定的开发者身份，升级测试包后可能需要重新授予屏幕录制权限。
+
+          ## 安装说明
+
+          - 使用 Release 优化与 ad-hoc 签名，未经过 Developer ID 签名和 Apple 公证。macOS 可能阻止首次打开。
+          - ad-hoc 签名不提供稳定的开发者身份，升级后可能需要重新授予屏幕录制权限。
           - `.dmg.sha256` 是对应安装包的 SHA-256 校验文件。dSYM 与构建缓存不随安装包分发。
           NOTES
           gh release create "$RELEASE_TAG" "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --draft --prerelease \
-            --title "Clipato $VERSION (build $BUILD) · Test" \
+            "${release_flags[@]}" \
+            --title "Clipato $VERSION (build $BUILD) · $channel_name" \
             --notes-file "$RUNNER_TEMP/release-notes.md"

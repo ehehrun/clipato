@@ -427,9 +427,14 @@ final class AppearanceSettingsTests: XCTestCase {
 
     private func contrast(_ first: UInt32, _ second: UInt32) -> Double {
         func luminance(_ rgb: UInt32) -> Double {
-            let components = [Double((rgb >> 16) & 255), Double((rgb >> 8) & 255), Double(rgb & 255)]
-                .map { $0 / 255 }
-                .map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            let red: Double = Double((rgb >> 16) & 255) / 255.0
+            let green: Double = Double((rgb >> 8) & 255) / 255.0
+            let blue: Double = Double(rgb & 255) / 255.0
+            let components: [Double] = [red, green, blue].map { component -> Double in
+                if component <= 0.04045 { return component / 12.92 }
+                let adjusted: Double = (component + 0.055) / 1.055
+                return pow(adjusted, 2.4)
+            }
             return components[0] * 0.2126 + components[1] * 0.7152 + components[2] * 0.0722
         }
         let first = luminance(first)
@@ -438,10 +443,12 @@ final class AppearanceSettingsTests: XCTestCase {
     }
 
     private func blend(_ background: UInt32, _ foreground: UInt32, fraction: Double) -> UInt32 {
-        [16, 8, 0].reduce(0) { result, shift in
+        [16, 8, 0].reduce(UInt32(0)) { (result: UInt32, shift: Int) -> UInt32 in
             let back = Double((background >> shift) & 255)
             let front = Double((foreground >> shift) & 255)
-            return result | (UInt32((back * (1 - fraction) + front * fraction).rounded()) << shift)
+            let channel: Double = back * (1 - fraction) + front * fraction
+            let component: UInt32 = UInt32(channel.rounded())
+            return result | (component << shift)
         }
     }
 

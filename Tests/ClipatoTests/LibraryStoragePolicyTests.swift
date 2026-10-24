@@ -39,7 +39,7 @@ final class LibraryStoragePolicyTests: XCTestCase {
         try library.updateStoragePolicy(.init(maximumBytes: 1))
         await library.refreshStorageUsage()
         XCTAssertEqual(library.images.map(\.id), [image.id])
-        XCTAssertTrue(library.storageUsageError!.contains("未开启"))
+        XCTAssertEqual(library.storageUsageError, L("媒体容量已超过上限，自动清理未开启。"))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Trash").path).isEmpty)
     }
 
@@ -70,7 +70,7 @@ final class LibraryStoragePolicyTests: XCTestCase {
         try library.updateStoragePolicy(.init(maximumBytes: 1, automaticallyRemoveOldestImages: true))
         await library.refreshStorageUsage()
         XCTAssertEqual(Set(library.images.map(\.id)), [tagged.id, recent.id, pinned.id])
-        XCTAssertTrue(library.storageUsageError!.contains("仍超过上限"))
+        XCTAssertEqual(library.storageUsageError, L("媒体容量仍超过上限；其余图片受到保留规则保护，录屏不会自动清理。"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: video.appendingPathComponent("recording.mp4").path))
     }
 
@@ -84,7 +84,7 @@ final class LibraryStoragePolicyTests: XCTestCase {
         let image = try library.addImage(try XCTUnwrap(context.makeImage()), source: "截图")
         await library.refreshStorageUsage()
         XCTAssertEqual(library.images.map(\.id), [image.id])
-        XCTAssertTrue(library.storageUsageError!.contains("仍超过上限"))
+        XCTAssertEqual(library.storageUsageError, L("媒体容量仍超过上限；其余图片受到保留规则保护，录屏不会自动清理。"))
 
         await library.refreshStorageUsage()
         XCTAssertTrue(library.images.isEmpty)
@@ -159,7 +159,7 @@ final class LibraryStoragePolicyTests: XCTestCase {
         XCTAssertEqual(library.images.map(\.id), [image.id])
         XCTAssertEqual(library.storageUsage?.imageBytes, 100)
         XCTAssertEqual(library.assets(in: collection.id), [.image(image.id)])
-        XCTAssertTrue(library.storageUsageError!.contains("仍超过上限"))
+        XCTAssertEqual(library.storageUsageError, L("媒体容量仍超过上限；其余图片受到保留规则保护，录屏不会自动清理。"))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("Trash").path).isEmpty)
     }
 
@@ -174,7 +174,7 @@ final class LibraryStoragePolicyTests: XCTestCase {
         await library.refreshStorageUsage()
 
         XCTAssertEqual(library.storageUsage?.isComplete, false)
-        XCTAssertTrue(library.storageUsageError!.contains("暂停自动清理"))
+        XCTAssertEqual(library.storageUsageError, L("部分文件无法访问，当前容量不完整；已暂停自动清理。\n") + library.storageUsage!.unavailablePaths.joined(separator: "\n"))
         XCTAssertEqual(Set(library.images.map(\.id)), [old.id, missing.id])
         XCTAssertTrue(FileManager.default.fileExists(atPath: library.imageURL(old).path))
     }
@@ -214,7 +214,7 @@ final class LibraryStoragePolicyTests: XCTestCase {
 
         XCTAssertEqual(library.images.map(\.id), [image.id])
         XCTAssertEqual(library.storageUsage?.imageBytes, 100)
-        XCTAssertTrue(library.storageUsageError!.contains("仍超过上限"))
+        XCTAssertEqual(library.storageUsageError, L("媒体容量仍超过上限；其余图片受到保留规则保护，录屏不会自动清理。"))
     }
 
     private func makeLibrary(in directory: URL) throws -> LibraryStore {

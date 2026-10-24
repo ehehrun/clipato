@@ -86,8 +86,8 @@ final class BatchImageExporterTests: XCTestCase {
             XCTAssertEqual(process.terminationStatus, 0)
             let names = try FileManager.default.contentsOfDirectory(atPath: extracted.path)
             if format == .pdf {
-                XCTAssertEqual(names, ["图片.pdf"])
-                XCTAssertEqual(try XCTUnwrap(CGPDFDocument(extracted.appendingPathComponent("图片.pdf") as CFURL)).numberOfPages, 2)
+                XCTAssertEqual(names, [L("图片.pdf")])
+                XCTAssertEqual(try XCTUnwrap(CGPDFDocument(extracted.appendingPathComponent(L("图片.pdf")) as CFURL)).numberOfPages, 2)
             } else {
                 XCTAssertEqual(Set(names), Set(["一.jpeg", "二.jpeg"]))
                 XCTAssertEqual(try read(extracted.appendingPathComponent("一.jpeg")).width, 64)
@@ -194,7 +194,10 @@ final class BatchImageExporterTests: XCTestCase {
         do {
             try await BatchImageExporter.export(images: [input], output: root, options: .init(), overwrite: true)
             XCTFail("导出覆盖了仅扩展名大小写不同的源文件")
-        } catch { XCTAssertTrue(error.localizedDescription.contains("不能覆盖原始图片"), "\(error)") }
+        } catch {
+            let target = root.standardizedFileURL.resolvingSymlinksInPath().appendingPathComponent(lowercase.lastPathComponent)
+            XCTAssertEqual(error.localizedDescription, L("导出不能覆盖原始图片：\(target.path)"))
+        }
         XCTAssertEqual(try Data(contentsOf: input), original)
         try assertNoStaging(root)
     }
@@ -210,7 +213,10 @@ final class BatchImageExporterTests: XCTestCase {
             try await BatchImageExporter.export(images: [input], output: output,
                 options: .init(mode: .video, videoFormat: .gif), overwrite: true)
             XCTFail("导出替换了原图的硬链接")
-        } catch { XCTAssertTrue(error.localizedDescription.contains("不能覆盖原始图片"), "\(error)") }
+        } catch {
+            let target = output.standardizedFileURL.resolvingSymlinksInPath()
+            XCTAssertEqual(error.localizedDescription, L("导出不能覆盖原始图片：\(target.path)"))
+        }
         XCTAssertEqual(try Data(contentsOf: input), original)
         XCTAssertEqual(try Data(contentsOf: output), original)
         try assertNoStaging(root)

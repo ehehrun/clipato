@@ -36,7 +36,7 @@ final class ShortcutTests: XCTestCase {
         let manager = ShortcutManager(defaults: defaults)
         let before = manager.bindings
         XCTAssertThrowsError(try manager.setShortcut(before[.captureRegion], for: .pinLatest)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("截取区域"))
+            XCTAssertEqual(error.localizedDescription, L("\(before[.captureRegion]!.displayName) 已用于「\(ShortcutAction.captureRegion.title)」，请使用不同快捷键。"))
         }
         XCTAssertEqual(manager.bindings, before)
         XCTAssertTrue(manager.errors.isEmpty)
@@ -118,7 +118,7 @@ final class ShortcutTests: XCTestCase {
             let manager = ShortcutManager(defaults: defaults)
             XCTAssertTrue(manager.bindings.isEmpty)
             XCTAssertEqual(manager.errors.count, ShortcutAction.allCases.count)
-            XCTAssertTrue(manager.errors.values.allSatisfy { $0.contains("读取快捷键失败") })
+            XCTAssertTrue(manager.errors.values.allSatisfy { $0.hasPrefix(L("读取快捷键失败：\("")")) })
             XCTAssertEqual(defaults.data(forKey: "FrameVault.shortcuts"), data)
         }
     }
