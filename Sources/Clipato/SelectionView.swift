@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 
 @MainActor
 final class SelectionView: NSView {
@@ -37,6 +38,10 @@ final class SelectionView: NSView {
     private let background: NSImage
     private let drawingOverlay = SelectionDrawingView()
     private let pointerOverlay = SelectionPointerView()
+    private let pointerValueText = SelectionTextLine(font: CTFontCreateUIFontForLanguage(.userFixedPitch, 11, nil)!)
+    private let pointerHintText = SelectionTextLine(font: CTFontCreateUIFontForLanguage(.system, 10, nil)!)
+    private let pointerLabelText = SelectionTextLine(font: CTFontCreateUIFontForLanguage(.system, 11, nil)!)
+    private let dimensionsText = SelectionTextLine(font: CTFontCreateUIFontForLanguage(.userFixedPitch, 11, nil)!)
     private let colorSampler = Result { try ScreenPixelColorSampler() }
     private let toolbar = NSVisualEffectView()
     private let toolbarStack = NSStackView()
@@ -968,14 +973,14 @@ final class SelectionView: NSView {
 
     private func drawDimensions() {
         let pixels = pixelSelection
-        let label = "\(Int(selection.width)) × \(Int(selection.height)) pt  ·  \(Int(pixels.width)) × \(Int(pixels.height)) px" as NSString
-        let attributes: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.white, .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)]
-        let size = label.size(withAttributes: attributes)
-        let rect = CGRect(x: min(max(selection.minX, 8), bounds.width - size.width - 20),
-                          y: selection.minY >= 30 ? selection.minY - 28 : selection.minY + 10, width: size.width + 12, height: 22)
+        dimensionsText.update("\(Int(selection.width)) × \(Int(selection.height)) pt  ·  \(Int(pixels.width)) × \(Int(pixels.height)) px")
+        let rect = CGRect(x: min(max(selection.minX, 8), bounds.width - dimensionsText.width - 20),
+                          y: selection.minY >= 30 ? selection.minY - 28 : selection.minY + 10,
+                          width: dimensionsText.width + 12, height: 22)
         NSColor.black.withAlphaComponent(0.8).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-        label.draw(at: CGPoint(x: rect.minX + 6, y: rect.minY + 4), withAttributes: attributes)
+        dimensionsText.draw(at: CGPoint(x: rect.minX + 6, y: rect.minY + 4), color: NSColor.white.cgColor,
+                            in: NSGraphicsContext.current!.cgContext)
     }
 
     private func updatePointerOverlay() {
@@ -988,16 +993,14 @@ final class SelectionView: NSView {
         pointerOverlay.verticalLine.isHidden = !showsFullScreenCrosshair
         pointerOverlay.horizontalLine.frame = CGRect(x: 0, y: pointer.y - 0.25, width: bounds.width, height: 0.5)
         pointerOverlay.verticalLine.frame = CGRect(x: pointer.x - 0.25, y: 0, width: 0.5, height: bounds.height)
-        let value = currentColorValue ?? L("无法读取颜色")
-        let colorFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let hintFont = NSFont.systemFont(ofSize: 10)
-        let hint = didCopyColor ? L("已复制") : L("C 复制 · Tab 切换")
-        let label = L("拖动选区 · Esc 取消") as NSString
-        let labelFont = NSFont.systemFont(ofSize: 11)
-        let labelWidth = label.size(withAttributes: [.font: labelFont]).width
-        let width = isColorPicking ? max(max(190, (value as NSString).size(withAttributes: [.font: colorFont]).width + 46),
-                                        max((hint as NSString).size(withAttributes: [.font: hintFont]).width + 24, labelWidth + 24))
-            : max(148, labelWidth + 16)
+        pointerLabelText.update(L("拖动选区 · Esc 取消"))
+        if isColorPicking {
+            pointerValueText.update(currentColorValue ?? L("无法读取颜色"))
+            pointerHintText.update(didCopyColor ? L("已复制") : L("C 复制 · Tab 切换"))
+        }
+        let width = isColorPicking ? max(max(190, pointerValueText.width + 46),
+                                        max(pointerHintText.width + 24, pointerLabelText.width + 24))
+            : max(148, pointerLabelText.width + 16)
         let height: CGFloat = isColorPicking ? 208 : 160
         let proposedX = pointer.x + 24 + width <= bounds.maxX - 12 ? pointer.x + 24 : pointer.x - 24 - width
         let proposedY = pointer.y + 24 + height <= bounds.maxY - 12 ? pointer.y + 24 : pointer.y - 24 - height
@@ -1012,12 +1015,6 @@ final class SelectionView: NSView {
         let pixelY = Int(pointerPixel.y)
         let sampleWidth = min(21, image.width), sampleHeight = min(21, image.height)
         let source = CGRect(x: min(max(pixelX - 10, 0), image.width - sampleWidth), y: min(max(pixelY - 10, 0), image.height - sampleHeight), width: sampleWidth, height: sampleHeight)
-        let value = currentColorValue ?? L("无法读取颜色")
-        let colorFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let hintFont = NSFont.systemFont(ofSize: 10)
-        let hint = didCopyColor ? L("已复制") : L("C 复制 · Tab 切换")
-        let label = L("拖动选区 · Esc 取消") as NSString
-        let labelFont = NSFont.systemFont(ofSize: 11)
         let width = bounds.width
         NSColor.black.withAlphaComponent(0.85).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9).fill()
@@ -1048,13 +1045,52 @@ final class SelectionView: NSView {
                 swatch.lineWidth = 1
                 swatch.stroke()
             }
-            (value as NSString).draw(at: CGPoint(x: 34, y: 143),
-                                     withAttributes: [.foregroundColor: NSColor.white, .font: colorFont])
-            (hint as NSString).draw(at: CGPoint(x: 12, y: 166),
-                                    withAttributes: [.foregroundColor: didCopyColor ? NSColor.systemGreen : NSColor.white.withAlphaComponent(0.8), .font: hintFont])
+            pointerValueText.draw(at: CGPoint(x: 34, y: 143), color: NSColor.white.cgColor, in: context)
+            pointerHintText.draw(at: CGPoint(x: 12, y: 166),
+                                 color: (didCopyColor ? NSColor.systemGreen : NSColor.white.withAlphaComponent(0.8)).cgColor,
+                                 in: context)
         }
-        label.draw(at: CGPoint(x: (isColorPicking ? 12 : 8), y: (isColorPicking ? 185 : 139)),
-                   withAttributes: [.foregroundColor: NSColor.white.withAlphaComponent(0.8), .font: labelFont])
+        pointerLabelText.draw(at: CGPoint(x: (isColorPicking ? 12 : 8), y: (isColorPicking ? 185 : 139)),
+                              color: NSColor.white.withAlphaComponent(0.8).cgColor, in: context)
+    }
+}
+
+@MainActor
+private final class SelectionTextLine {
+    private let font: CTFont
+    private var text = ""
+    private var line = CTLineCreateWithAttributedString(NSAttributedString(string: ""))
+    private var ascent: CGFloat = 0
+    private(set) var width: CGFloat = 0
+
+    init(font: CTFont) { self.font = font }
+
+    func update(_ text: String) {
+        guard self.text != text else { return }
+        self.text = text
+        // Keep a real CTFont and its shaped line; mouse movement must not re-enter NSString's font conversion.
+        line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+        ]))
+        width = ceil(CTLineGetTypographicBounds(line, &ascent, nil, nil))
+    }
+
+    func draw(at point: CGPoint, color: CGColor, in context: CGContext) {
+        let textMatrix = context.textMatrix
+        let textPosition = context.textPosition
+        context.saveGState()
+        defer {
+            context.restoreGState()
+            context.textMatrix = textMatrix
+            context.textPosition = textPosition
+        }
+        context.translateBy(x: point.x, y: point.y + ascent)
+        context.scaleBy(x: 1, y: -1)
+        context.textMatrix = .identity
+        context.textPosition = .zero
+        context.setFillColor(color)
+        CTLineDraw(line, context)
     }
 }
 

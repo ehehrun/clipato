@@ -174,6 +174,72 @@ final class SelectionPointerRenderingTests: XCTestCase {
         }
     }
 
+    func testLocalizedPointerTextSurvivesRepeatedMovementFormatChangesAndAutoreleasePools() throws {
+        let settings = LanguageSettings.shared
+        let originalLanguage = settings.language
+        let originalResolvedLanguage = settings.resolvedLanguage
+        let originalPreference = UserDefaults.standard.object(forKey: "language")
+        defer {
+            settings.setLanguage(originalLanguage, preferredLanguages: [originalResolvedLanguage.rawValue])
+            if let originalPreference {
+                UserDefaults.standard.set(originalPreference, forKey: "language")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "language")
+            }
+        }
+        try withSelection { view, window, pasteboard in
+            let magnifier = try XCTUnwrap(find("selection-magnifier", in: view))
+            let formats: [(ScreenshotColorFormat, String)] = [
+                (.hex, "#F02814"), (.rgb, "rgb(240, 40, 20)"), (.hsl, "hsl(5.5, 88%, 51%)")
+            ]
+            let corners = [CGPoint(x: 0, y: 0), CGPoint(x: 799.75, y: 0),
+                           CGPoint(x: 799.75, y: 599.75), CGPoint(x: 0, y: 599.75)]
+            for language in AppLanguage.allCases where language != .system {
+                for (format, expected) in formats {
+                    autoreleasepool {
+                        settings.setLanguage(language)
+                        for index in 0..<48 {
+                            move(CGPoint(x: 80 + index * 4, y: 70 + index * 3), in: view)
+                        }
+                        XCTAssertEqual(view.colorFormat, format, language.rawValue)
+                        XCTAssertEqual(view.currentColorValue, expected, language.rawValue)
+                        key(8, characters: "c", in: view)
+                        XCTAssertEqual(pasteboard.string(forType: .string), expected, language.rawValue)
+                    }
+                    // Draw only after temporary strings and fonts from the event phase have been released.
+                    magnifier.needsDisplay = true
+                    let bitmap = try snapshot(magnifier, scale: 2)
+                    for band in [143..<162, 166..<183, 185..<205] {
+                        var hasText = false
+                        for y in stride(from: band.lowerBound, to: band.upperBound, by: 2) {
+                            for x in stride(from: 34, to: Int(magnifier.bounds.width) - 8, by: 2) {
+                                let color = try XCTUnwrap(bitmap.colorAt(x: x * 2, y: y * 2)?.usingColorSpace(.sRGB))
+                                if max(color.redComponent, color.greenComponent, color.blueComponent) > 0.6 {
+                                    hasText = true
+                                    break
+                                }
+                            }
+                            if hasText { break }
+                        }
+                        XCTAssertTrue(hasText, "Missing pointer text in \(band), \(language.rawValue), \(format)")
+                    }
+                    for point in corners {
+                        autoreleasepool { move(point, in: view) }
+                        magnifier.needsDisplay = true
+                        _ = try snapshot(magnifier, scale: 2)
+                        XCTAssertGreaterThanOrEqual(magnifier.frame.minX, 12)
+                        XCTAssertGreaterThanOrEqual(magnifier.frame.minY, 12)
+                        XCTAssertLessThanOrEqual(magnifier.frame.maxX, view.bounds.maxX - 12)
+                        XCTAssertLessThanOrEqual(magnifier.frame.maxY, view.bounds.maxY - 12)
+                    }
+                    key(48, characters: "\t", in: view)
+                }
+            }
+            XCTAssertTrue(view.selection.isEmpty)
+            XCTAssertFalse(window.isVisible)
+        }
+    }
+
     private func withSelection(scale: Int = 2, showsCrosshair: Bool = true,
                                _ operation: (SelectionView, SelectionWindow, NSPasteboard) throws -> Void) throws {
         _ = NSApplication.shared
