@@ -1290,3 +1290,5 @@
 // Disclosure accessibility states
 "已展开" = "Expanded";
 "已折叠" = "Collapsed";
+"无法读取窗口列表，请重试截图。" = "Unable to read the window list. Try taking the screenshot again.";
+"单击选窗 · 拖动框选" = "Click window · Drag area";

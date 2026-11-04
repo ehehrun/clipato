@@ -25,6 +25,9 @@ final class SelectionView: NSView {
     private(set) var recordingMode: RecordingMode
     private(set) var assetTag: AssetTag?
     private(set) var selection = CGRect.zero
+    private(set) var hoveredWindow: SelectionWindowTarget?
+    private let windowTargets: [SelectionWindowTarget]
+    private var pressedWindow: SelectionWindowTarget?
     private(set) var annotations: [ImageAnnotation] = [] {
         didSet {
             textBounds = annotations.map(\.textBounds)
@@ -36,7 +39,11 @@ final class SelectionView: NSView {
     }
     private var textBounds: [CGRect] = []
     private let background: NSImage
+    private let shadeLayer = CAShapeLayer()
+    private let borderLayer = CAShapeLayer()
+    private let handlesLayer = CAShapeLayer()
     private let drawingOverlay = SelectionDrawingView()
+    private let dimensionsView = SelectionDimensionsView()
     private let pointerOverlay = SelectionPointerView()
     private let pointerValueText = SelectionTextLine(font: CTFontCreateUIFontForLanguage(.userFixedPitch, 11, nil)!)
     private let pointerHintText = SelectionTextLine(font: CTFontCreateUIFontForLanguage(.system, 10, nil)!)
@@ -93,7 +100,8 @@ final class SelectionView: NSView {
          recordingMode: RecordingMode = .keyframes, tag: AssetTag? = nil, allowsTagSelection: Bool = true,
          colorFormat: ScreenshotColorFormat? = nil, colorPasteboard: NSPasteboard = .general,
          showsFullScreenCrosshair: Bool = UserDefaults.standard.object(forKey: "screenshotShowsFullScreenCrosshair") == nil
-            || UserDefaults.standard.bool(forKey: "screenshotShowsFullScreenCrosshair")) {
+            || UserDefaults.standard.bool(forKey: "screenshotShowsFullScreenCrosshair"),
+         windowTargets: [SelectionWindowTarget] = []) {
         self.image = image
         self.mode = mode
         self.recordingMode = recordingMode
@@ -102,16 +110,35 @@ final class SelectionView: NSView {
         self.colorFormat = colorFormat ?? .saved()
         self.colorPasteboard = colorPasteboard
         self.showsFullScreenCrosshair = showsFullScreenCrosshair
+        if case .screenshot = mode, !initialFullScreen { self.windowTargets = windowTargets }
+        else { self.windowTargets = [] }
         background = NSImage(cgImage: image, size: frame.size)
         super.init(frame: frame)
         // Share the captured image with Core Animation; interaction only redraws the transparent overlay.
         wantsLayer = true
+        shadeLayer.name = "selection-shade"
+        shadeLayer.fillRule = .evenOdd
+        shadeLayer.fillColor = NSColor.black.withAlphaComponent(0.4).cgColor
+        borderLayer.name = "selection-border"
+        borderLayer.fillColor = nil
+        borderLayer.strokeColor = NSColor.systemBlue.cgColor
+        borderLayer.lineWidth = 1.5
+        handlesLayer.name = "selection-handles"
+        handlesLayer.fillColor = NSColor.systemBlue.cgColor
+        handlesLayer.strokeColor = NSColor.white.cgColor
+        handlesLayer.lineWidth = 1.2
+        for geometryLayer in [shadeLayer, borderLayer, handlesLayer] { layer!.addSublayer(geometryLayer) }
         drawingOverlay.selectionView = self
         drawingOverlay.identifier = NSUserInterfaceItemIdentifier("selection-drawing-overlay")
         drawingOverlay.frame = bounds
         drawingOverlay.autoresizingMask = [.width, .height]
         drawingOverlay.wantsLayer = true
         addSubview(drawingOverlay)
+        dimensionsView.selectionView = self
+        dimensionsView.identifier = NSUserInterfaceItemIdentifier("selection-dimensions")
+        dimensionsView.wantsLayer = true
+        dimensionsView.isHidden = true
+        addSubview(dimensionsView)
         pointerOverlay.identifier = NSUserInterfaceItemIdentifier("selection-pointer-overlay")
         pointerOverlay.frame = bounds
         pointerOverlay.autoresizingMask = [.width, .height]
@@ -161,9 +188,13 @@ final class SelectionView: NSView {
         super.viewDidMoveToWindow()
         installedCursor = nil
         if let window {
+            for geometryLayer in [shadeLayer, borderLayer, handlesLayer] {
+                geometryLayer.contentsScale = window.backingScaleFactor
+            }
             pointer = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
             isPointerInside = bounds.contains(pointer)
             updateColorSample()
+            updateHoveredWindow()
             updatePointerOverlay()
         }
     }
@@ -182,6 +213,8 @@ final class SelectionView: NSView {
         super.resetCursorRects()
         addCursorRect(visibleRect, cursor: .crosshair)
     }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     func updateCursor(force: Bool = false) {
         guard let window, window.isVisible else { return }
@@ -224,6 +257,7 @@ final class SelectionView: NSView {
         pointer = convert(event.locationInWindow, from: nil)
         isPointerInside = bounds.contains(pointer)
         updateColorSample()
+        updateHoveredWindow()
         updateCursor(at: pointer, force: event.type == .mouseEntered)
         updatePointerOverlay()
     }
@@ -232,16 +266,26 @@ final class SelectionView: NSView {
         installedCursor = nil
         isPointerInside = false
         updateColorSample()
+        updateHoveredWindow()
         updatePointerOverlay()
+    }
+
+    private func updateHoveredWindow() {
+        let target = !finished && !hasStartedSelection && isPointerInside && selection.isEmpty && drag == nil
+            ? windowTargets.first { $0.frame.contains(pointer) } : nil
+        guard target != hoveredWindow else { return }
+        hoveredWindow = target
+        updateSelectionGeometry()
     }
 
     override func mouseDown(with event: NSEvent) {
         guard !finished else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        pressedWindow = !hasStartedSelection && selection.isEmpty ? windowTargets.first { $0.frame.contains(location) } : nil
+        hoveredWindow = nil
         hasStartedSelection = true
         sampledColor = nil
         sampledPixel = nil
-        drawingOverlay.needsDisplay = true
-        let location = convert(event.locationInWindow, from: nil)
         // Empty toolbar space is still toolbar space, not a request for a new capture region.
         guard !isOverToolbar(location) else { return }
         finishTextEditing()
@@ -297,6 +341,13 @@ final class SelectionView: NSView {
         pointer = constrained(convert(event.locationInWindow, from: nil))
         switch drag {
         case .create(let anchor):
+            if pressedWindow != nil {
+                if hypot(pointer.x - anchor.x, pointer.y - anchor.y) < 3 {
+                    updatePointerOverlay()
+                    return
+                }
+                pressedWindow = nil
+            }
             selection = CGRect(x: min(anchor.x, pointer.x), y: min(anchor.y, pointer.y), width: abs(pointer.x - anchor.x), height: abs(pointer.y - anchor.y))
         case .move(let anchor, let original):
             selection.origin = CGPoint(x: min(max(original.minX + pointer.x - anchor.x, 0), bounds.width - original.width),
@@ -329,6 +380,10 @@ final class SelectionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard drag != nil, !finished else { return }
         mouseDragged(with: event)
+        if let pressedWindow {
+            selection = pressedWindow.frame
+            self.pressedWindow = nil
+        }
         if case .moveText(let index, _, let original, _) = drag, let currentAnnotation {
             if currentAnnotation != original { record(.replace(index: index, before: original, after: currentAnnotation)) }
             self.currentAnnotation = nil
@@ -414,12 +469,6 @@ final class SelectionView: NSView {
     }
 
     fileprivate func drawSelection(_ dirtyRect: NSRect) {
-        let shade = NSBezierPath(rect: bounds)
-        if !selection.isEmpty { shade.appendRect(selection) }
-        shade.windingRule = .evenOdd
-        NSColor.black.withAlphaComponent(0.4).setFill()
-        shade.fill()
-
         if !selection.isEmpty {
             let context = NSGraphicsContext.current!.cgContext
             context.saveGState()
@@ -440,18 +489,6 @@ final class SelectionView: NSView {
                 context.stroke(rect.insetBy(dx: -2 / scale, dy: -2 / scale))
             }
             context.restoreGState()
-            NSColor.systemBlue.setStroke()
-            let outline = NSBezierPath(rect: selection)
-            outline.lineWidth = 1.5
-            outline.stroke()
-            if drag == nil {
-                for point in handleCenters {
-                    let handle = NSBezierPath(ovalIn: CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8))
-                    NSColor.systemBlue.setFill(); handle.fill()
-                    NSColor.white.setStroke(); handle.lineWidth = 1.2; handle.stroke()
-                }
-            }
-            drawDimensions()
         }
     }
 
@@ -805,18 +842,28 @@ final class SelectionView: NSView {
     }
 
     private func updateSelection() {
-        let showsFontSize = tool == .text || textEditor != nil
-        fontSizePicker.isHidden = !showsFontSize
-        fontSizePicker.isEnabled = showsFontSize
-        updateToolbarSize()
         toolbar.isHidden = selection.isEmpty || (drag != nil && !isDraggingText)
         if toolbar.isHidden { colorPalette.isHidden = true }
         if !toolbar.isHidden {
+            let showsFontSize = tool == .text || textEditor != nil
+            fontSizePicker.isHidden = !showsFontSize
+            fontSizePicker.isEnabled = showsFontSize
+            updateToolbarSize()
             let x = min(max(selection.maxX - toolbar.frame.width, 8), max(8, bounds.width - toolbar.frame.width - 8))
             let below = selection.maxY + 12
             let above = selection.minY - toolbar.frame.height - 40
             let y = below + toolbar.frame.height <= bounds.height - 8 ? below : (above >= 8 ? above : bounds.height - toolbar.frame.height - 8)
             toolbar.setFrameOrigin(CGPoint(x: x, y: y))
+            for (id, button) in buttons {
+                let selected = id == (tool?.rawValue ?? "move")
+                button.contentTintColor = selected ? .systemBlue : .labelColor
+            }
+            buttons["color"]?.contentTintColor = color
+            buttons["color"]?.isEnabled = tool != .mosaic
+            buttons["undo"]?.isEnabled = !history.isEmpty || textEditor != nil
+            buttons["redo"]?.isEnabled = !undone.isEmpty && textEditor == nil
+            buttons["start"]?.contentTintColor = .systemRed
+            buttons["start-fixed-capture"]?.contentTintColor = .systemGreen
         }
         mosaicOptions.isHidden = toolbar.isHidden || tool != .mosaic
         if !mosaicOptions.isHidden {
@@ -825,19 +872,45 @@ final class SelectionView: NSView {
             let y = below + mosaicOptions.frame.height <= bounds.height - 8 ? below : toolbar.frame.minY - mosaicOptions.frame.height - 6
             mosaicOptions.setFrameOrigin(CGPoint(x: x, y: max(8, y)))
         }
-        for (id, button) in buttons {
-            let selected = id == (tool?.rawValue ?? "move")
-            button.contentTintColor = selected ? .systemBlue : .labelColor
-        }
-        buttons["color"]?.contentTintColor = color
-        buttons["color"]?.isEnabled = tool != .mosaic
-        buttons["undo"]?.isEnabled = !history.isEmpty || textEditor != nil
-        buttons["redo"]?.isEnabled = !undone.isEmpty && textEditor == nil
-        buttons["start"]?.contentTintColor = .systemRed
-        buttons["start-fixed-capture"]?.contentTintColor = .systemGreen
         updateCursor()
         updatePointerOverlay()
-        drawingOverlay.needsDisplay = true
+        updateSelectionGeometry()
+        let hasAnnotationDrawing = !selection.isEmpty && (!annotations.isEmpty || currentAnnotation != nil || renderingFailed)
+        drawingOverlay.isHidden = !hasAnnotationDrawing
+        drawingOverlay.needsDisplay = hasAnnotationDrawing
+    }
+
+    private func updateSelectionGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        for geometryLayer in [shadeLayer, borderLayer, handlesLayer] { geometryLayer.frame = bounds }
+        let frame: CGRect
+        if finished { frame = .zero }
+        else if !selection.isEmpty { frame = selection }
+        else if let pressedWindow { frame = pressedWindow.frame }
+        else if let hoveredWindow { frame = hoveredWindow.frame }
+        else { frame = .zero }
+        let shade = CGMutablePath()
+        shade.addRect(bounds)
+        if !frame.isEmpty { shade.addRect(frame) }
+        shadeLayer.path = shade
+        borderLayer.isHidden = frame.isEmpty
+        borderLayer.path = frame.isEmpty ? nil : CGPath(rect: frame, transform: nil)
+        handlesLayer.isHidden = finished || selection.isEmpty || drag != nil
+        let handles = CGMutablePath()
+        if !handlesLayer.isHidden {
+            for point in handleCenters { handles.addEllipse(in: CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)) }
+        }
+        handlesLayer.path = handles
+        dimensionsView.isHidden = finished || selection.isEmpty
+        guard !dimensionsView.isHidden else { return }
+        let pixels = pixelSelection
+        let textChanged = dimensionsText.update("\(Int(selection.width)) × \(Int(selection.height)) pt  ·  \(Int(pixels.width)) × \(Int(pixels.height)) px")
+        dimensionsView.frame = CGRect(x: min(max(selection.minX, 8), bounds.width - dimensionsText.width - 20),
+                                      y: selection.minY >= 30 ? selection.minY - 28 : selection.minY + 10,
+                                      width: dimensionsText.width + 12, height: 22)
+        if textChanged { dimensionsView.needsDisplay = true }
     }
 
     @objc private func selectTool(_ sender: NSButton) {
@@ -894,6 +967,9 @@ final class SelectionView: NSView {
     @objc private func cancel() {
         guard !finished else { return }
         finished = true
+        hoveredWindow = nil
+        pressedWindow = nil
+        updateSelectionGeometry()
         updatePointerOverlay()
         onFinish?(nil, .copy)
     }
@@ -904,6 +980,9 @@ final class SelectionView: NSView {
         guard !finished, !renderingFailed, !selection.isEmpty, drag == nil else { return }
         finishTextEditing()
         finished = true
+        hoveredWindow = nil
+        pressedWindow = nil
+        updateSelectionGeometry()
         updatePointerOverlay()
         onFinish?(pixelSelection, action)
     }
@@ -971,15 +1050,10 @@ final class SelectionView: NSView {
         CGPoint(x: min(max(point.x, 0), bounds.width), y: min(max(point.y, 0), bounds.height))
     }
 
-    private func drawDimensions() {
-        let pixels = pixelSelection
-        dimensionsText.update("\(Int(selection.width)) × \(Int(selection.height)) pt  ·  \(Int(pixels.width)) × \(Int(pixels.height)) px")
-        let rect = CGRect(x: min(max(selection.minX, 8), bounds.width - dimensionsText.width - 20),
-                          y: selection.minY >= 30 ? selection.minY - 28 : selection.minY + 10,
-                          width: dimensionsText.width + 12, height: 22)
+    fileprivate func drawDimensions(in rect: CGRect) {
         NSColor.black.withAlphaComponent(0.8).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-        dimensionsText.draw(at: CGPoint(x: rect.minX + 6, y: rect.minY + 4), color: NSColor.white.cgColor,
+        dimensionsText.draw(at: CGPoint(x: 6, y: 4), color: NSColor.white.cgColor,
                             in: NSGraphicsContext.current!.cgContext)
     }
 
@@ -993,7 +1067,7 @@ final class SelectionView: NSView {
         pointerOverlay.verticalLine.isHidden = !showsFullScreenCrosshair
         pointerOverlay.horizontalLine.frame = CGRect(x: 0, y: pointer.y - 0.25, width: bounds.width, height: 0.5)
         pointerOverlay.verticalLine.frame = CGRect(x: pointer.x - 0.25, y: 0, width: 0.5, height: bounds.height)
-        pointerLabelText.update(L("拖动选区 · Esc 取消"))
+        pointerLabelText.update(hoveredWindow == nil ? L("拖动选区 · Esc 取消") : L("单击选窗 · 拖动框选"))
         if isColorPicking {
             pointerValueText.update(currentColorValue ?? L("无法读取颜色"))
             pointerHintText.update(didCopyColor ? L("已复制") : L("C 复制 · Tab 切换"))
@@ -1065,8 +1139,9 @@ private final class SelectionTextLine {
 
     init(font: CTFont) { self.font = font }
 
-    func update(_ text: String) {
-        guard self.text != text else { return }
+    @discardableResult
+    func update(_ text: String) -> Bool {
+        guard self.text != text else { return false }
         self.text = text
         // Keep a real CTFont and its shaped line; mouse movement must not re-enter NSString's font conversion.
         line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [
@@ -1074,6 +1149,7 @@ private final class SelectionTextLine {
             NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
         ]))
         width = ceil(CTLineGetTypographicBounds(line, &ascent, nil, nil))
+        return true
     }
 
     func draw(at point: CGPoint, color: CGColor, in context: CGContext) {
@@ -1101,6 +1177,13 @@ private final class SelectionDrawingView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         selectionView?.drawSelection(dirtyRect)
     }
+}
+
+private final class SelectionDimensionsView: NSView {
+    weak var selectionView: SelectionView?
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) { selectionView?.drawDimensions(in: bounds) }
 }
 
 private final class SelectionPointerView: NSView {

@@ -88,9 +88,11 @@ final class SelectionRenderingTests: XCTestCase {
         }
     }
 
-    func testPointerMovesLeaveCaptureAndShadeIntactWhileSelectionAndToolsInvalidateDrawing() throws {
+    func testPointerAndPlainSelectionKeepCaptureIntactWhileOnlyMarkupInvalidatesDrawing() throws {
         try withSelection { view, _ in
             let overlay = try XCTUnwrap(find("selection-drawing-overlay", in: view))
+            let shade = try XCTUnwrap(view.layer!.sublayers?.first { $0.name == "selection-shade" } as? CAShapeLayer)
+            let border = try XCTUnwrap(view.layer!.sublayers?.first { $0.name == "selection-border" } as? CAShapeLayer)
             _ = try snapshot(view, scale: 2)
             let background = try XCTUnwrap(view.layer!.contents as AnyObject?)
             XCTAssertTrue(view.wantsUpdateLayer)
@@ -99,10 +101,9 @@ final class SelectionRenderingTests: XCTestCase {
                 view.needsDisplay = false
                 overlay.needsDisplay = false
             }
-            @MainActor func assertDynamicInvalidation(_ phase: String) {
+            @MainActor func assertCaptureIntact(_ phase: String) {
                 XCTAssertFalse(view.layer!.needsDisplay(), "Static capture layer invalidated by \(phase)")
                 XCTAssertTrue((view.layer!.contents as AnyObject?) === background, "Captured image replaced by \(phase)")
-                XCTAssertTrue(overlay.layer!.needsDisplay(), "Dynamic drawing must be invalidated by \(phase)")
             }
             reset()
             view.mouseMoved(with: try event(.mouseMoved, at: CGPoint(x: 40, y: 40), in: view))
@@ -112,12 +113,28 @@ final class SelectionRenderingTests: XCTestCase {
             view.mouseDown(with: try event(.leftMouseDown, at: CGPoint(x: 80, y: 60), in: view))
             reset()
             view.mouseDragged(with: try event(.leftMouseDragged, at: CGPoint(x: 720, y: 440), in: view))
-            assertDynamicInvalidation("selection drag")
+            assertCaptureIntact("selection drag")
+            XCTAssertFalse(overlay.layer!.needsDisplay(), "Plain selection movement only updates retained geometry")
+            XCTAssertTrue(overlay.isHidden)
+            XCTAssertEqual(try XCTUnwrap(border.path).boundingBoxOfPath, CGRect(x: 80, y: 60, width: 640, height: 380))
+            XCTAssertEqual(shade.fillRule, .evenOdd)
+            XCTAssertFalse(try XCTUnwrap(shade.path).contains(CGPoint(x: 400, y: 250), using: .evenOdd))
+            XCTAssertTrue(try XCTUnwrap(shade.path).contains(CGPoint(x: 40, y: 40), using: .evenOdd))
             view.mouseUp(with: try event(.leftMouseUp, at: CGPoint(x: 720, y: 440), in: view))
             reset()
             let rectangle = try XCTUnwrap(find("rectangle", in: view) as? NSButton)
             XCTAssertTrue(rectangle.sendAction(try XCTUnwrap(rectangle.action), to: rectangle.target))
-            assertDynamicInvalidation("toolbar action")
+            assertCaptureIntact("toolbar action")
+            XCTAssertFalse(overlay.layer!.needsDisplay(), "Choosing a tool must not rasterize an empty annotation layer")
+            XCTAssertTrue(overlay.isHidden)
+            view.mouseDown(with: try event(.leftMouseDown, at: CGPoint(x: 150, y: 130), in: view))
+            reset()
+            view.mouseDragged(with: try event(.leftMouseDragged, at: CGPoint(x: 250, y: 210), in: view))
+            assertCaptureIntact("annotation drag")
+            XCTAssertTrue(overlay.layer!.needsDisplay())
+            XCTAssertFalse(overlay.isHidden)
+            view.mouseUp(with: try event(.leftMouseUp, at: CGPoint(x: 250, y: 210), in: view))
+            XCTAssertEqual(view.annotations.count, 1)
         }
     }
 

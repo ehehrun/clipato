@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 
 enum GuideAnimation: String, CaseIterable {
     static let previewWidth: CGFloat = 272
@@ -47,139 +46,26 @@ enum GuideAnimation: String, CaseIterable {
         image.size = CGSize(width: Self.previewWidth, height: Self.previewWidth / Self.aspectRatio)
         return image
     }
-
-    func document(bundle: Bundle = LanguageSettings.resourceBundle) throws -> String {
-        let svg = try svg(bundle: bundle)
-        return """
-        <!doctype html><html><head><meta charset="utf-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-        <style>html,body{margin:0;overflow:hidden;background:#f7f8fa}svg{display:block;width:100%;height:100vh;pointer-events:none;user-select:none}</style>
-        </head><body>\(svg)</body></html>
-        """
-    }
 }
 
-// The illustration has no interactive content. Wheel and drag events belong to the guide's ScrollView.
-private final class GuideAnimationCanvas: WKWebView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override var acceptsFirstResponder: Bool { false }
-}
-
-@MainActor
-final class GuideAnimationPlayer: NSObject, WKNavigationDelegate {
-    let webView: WKWebView
-    private(set) var isReady = false
-    private var playing = false
-    private var replay = 0
-    private var stopped = false
-    var onReady: () -> Void
-    var onFailure: (Error) -> Void
-
-    init(onReady: @escaping () -> Void = {}, onFailure: @escaping (Error) -> Void) {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-        webView = GuideAnimationCanvas(frame: .zero, configuration: configuration)
-        self.onReady = onReady
-        self.onFailure = onFailure
-        super.init()
-        webView.navigationDelegate = self
-    }
-
-    func load(_ animation: GuideAnimation) throws {
-        isReady = false
-        webView.loadHTMLString(try animation.document(), baseURL: nil)
-    }
-
-    func setPlayback(playing: Bool, replay: Int) {
-        guard self.playing != playing || self.replay != replay else { return }
-        let restart = self.replay != replay
-        self.playing = playing
-        self.replay = replay
-        if isReady { synchronize(restart: restart) }
-    }
-
-    func stop() {
-        stopped = true
-        isReady = false
-        webView.stopLoading()
-        webView.navigationDelegate = nil
-        webView.evaluateJavaScript("document.querySelector('svg').pauseAnimations()", in: nil, in: .defaultClient) { _ in }
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Assets begin indefinitely so Reduce Motion never flashes an autoplaying frame during loading.
-        evaluate("""
-        const svg = document.querySelector('svg');
-        svg.pauseAnimations(); svg.setCurrentTime(0);
-        svg.querySelectorAll('animate,animateTransform').forEach(a => a.beginElement());
-        svg.setCurrentTime(0);
-        """) { [weak self] in
-            guard let self, !self.stopped else { return }
-            self.isReady = true
-            self.synchronize(restart: false)
-            self.onReady()
-        }
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if !stopped { onFailure(error) }
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if !stopped { onFailure(error) }
-    }
-
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        if !stopped { onFailure(WKError(.webContentProcessTerminated)) }
-    }
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(navigationAction.request.url?.absoluteString == "about:blank" ? .allow : .cancel)
-    }
-
-    private func synchronize(restart: Bool) {
-        evaluate("""
-        const svg = document.querySelector('svg');
-        \(restart ? "svg.setCurrentTime(0);" : "")
-        svg.\(playing ? "unpauseAnimations" : "pauseAnimations")();
-        """)
-    }
-
-    private func evaluate(_ script: String, completion: @escaping () -> Void = {}) {
-        webView.evaluateJavaScript("(() => { \(script) })()", in: nil, in: .defaultClient) { [weak self] result in
-            guard let self, !self.stopped else { return }
-            switch result {
-            case .success: completion()
-            case .failure(let error): self.onFailure(error)
-            }
-        }
-    }
-}
-
-private struct GuideAnimationWebView: NSViewRepresentable {
+private struct GuideAnimationNativeView: NSViewRepresentable {
     let animation: GuideAnimation
     let playing: Bool
     let replay: Int
-    let onReady: () -> Void
     let onFailure: (Error) -> Void
 
-    func makeCoordinator() -> GuideAnimationPlayer { GuideAnimationPlayer(onReady: onReady, onFailure: onFailure) }
-
-    func makeNSView(context: Context) -> WKWebView {
-        do { try context.coordinator.load(animation) }
+    func makeNSView(context: Context) -> GuideAnimationPlayer {
+        let view = GuideAnimationPlayer()
+        do { try view.load(animation) }
         catch { Task { @MainActor in onFailure(error) } }
-        return context.coordinator.webView
+        return view
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) {
-        context.coordinator.onReady = onReady
-        context.coordinator.onFailure = onFailure
-        context.coordinator.setPlayback(playing: playing, replay: replay)
+    func updateNSView(_ view: GuideAnimationPlayer, context: Context) {
+        view.setPlayback(playing: playing, replay: replay)
     }
 
-    static func dismantleNSView(_ view: WKWebView, coordinator: GuideAnimationPlayer) { coordinator.stop() }
+    static func dismantleNSView(_ view: GuideAnimationPlayer, coordinator: ()) { view.stop() }
 }
 
 private struct GuideAnimationFrame: PreferenceKey {
@@ -196,7 +82,6 @@ struct GuideAnimationRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var poster: NSImage?
-    @State private var ready = false
     @State private var manuallyPlaying = false
     @State private var isVisible = false
     @State private var failure: String?
@@ -225,9 +110,14 @@ struct GuideAnimationRow<Content: View>: View {
             catch { failure = error.localizedDescription }
         }
         .onChange(of: active) { _, selected in
-            if selected != animation { ready = false; manuallyPlaying = false }
+            if selected != animation { manuallyPlaying = false }
         }
         .onChange(of: reduceMotion) { _, _ in manuallyPlaying = false }
+        .onDisappear {
+            manuallyPlaying = false
+            if hovered == animation { hovered = nil }
+            if active == animation { active = nil }
+        }
         .accessibilityAction(named: Text(L("播放"))) { togglePlayback() }
     }
 
@@ -242,10 +132,9 @@ struct GuideAnimationRow<Content: View>: View {
                 Label(L("无法播放演示"), systemImage: "exclamationmark.triangle")
                     .consoleFont(11).foregroundStyle(Palette.muted).padding(10).help(failure)
             } else if active == animation {
-                GuideAnimationWebView(animation: animation, playing: playing && isVisible && applicationActive,
-                                      replay: 0, onReady: { ready = true },
-                                      onFailure: { failure = $0.localizedDescription })
-                    .opacity(ready ? 1 : 0).accessibilityHidden(true)
+                GuideAnimationNativeView(animation: animation, playing: playing && isVisible && applicationActive,
+                                         replay: 0, onFailure: { failure = $0.localizedDescription })
+                    .accessibilityHidden(true)
             }
             if reduceMotion && failure == nil {
                 Button { togglePlayback() } label: {

@@ -7,22 +7,26 @@ import XCTest
 final class SelectionPointerRenderingTests: XCTestCase {
     func testHoverAndColorKeysRedrawOnlyTheCompactMagnifier() throws {
         try withSelection { view, _, pasteboard in
-            let shade = try XCTUnwrap(find("selection-drawing-overlay", in: view))
+            let drawing = try XCTUnwrap(find("selection-drawing-overlay", in: view))
+            let shade = try XCTUnwrap(view.layer!.sublayers?.first { $0.name == "selection-shade" } as? CAShapeLayer)
             let pointer = try XCTUnwrap(find("selection-pointer-overlay", in: view))
             let magnifier = try XCTUnwrap(find("selection-magnifier", in: view))
             move(CGPoint(x: 160, y: 120), in: view)
             _ = try snapshot(view, scale: 2)
             let background = try XCTUnwrap(view.layer!.contents as AnyObject?)
-            let shadeContents = try XCTUnwrap(shade.layer!.contents as AnyObject?)
+            let shadePath = try XCTUnwrap(shade.path)
             XCTAssertTrue(pointer.wantsUpdateLayer)
 
             @MainActor func assertCompactRedraw(file: StaticString = #filePath, line: UInt = #line) {
                 XCTAssertFalse(view.layer!.needsDisplay(), file: file, line: line)
-                XCTAssertFalse(shade.layer!.needsDisplay(), file: file, line: line)
+                XCTAssertFalse(drawing.layer!.needsDisplay(), file: file, line: line)
+                XCTAssertTrue(drawing.isHidden, file: file, line: line)
                 XCTAssertFalse(pointer.layer!.needsDisplay(), file: file, line: line)
                 XCTAssertTrue(magnifier.layer!.needsDisplay(), file: file, line: line)
                 XCTAssertTrue((view.layer!.contents as AnyObject?) === background, file: file, line: line)
-                XCTAssertTrue((shade.layer!.contents as AnyObject?) === shadeContents, file: file, line: line)
+                XCTAssertTrue(shade.path === shadePath, file: file, line: line)
+                XCTAssertEqual(shade.path?.boundingBoxOfPath, view.bounds, file: file, line: line)
+                XCTAssertTrue(shadePath.contains(CGPoint(x: 400, y: 300), using: .evenOdd), file: file, line: line)
             }
 
             for point in [CGPoint(x: 401.25, y: 301.75), CGPoint(x: 170, y: 130)] {
@@ -121,7 +125,9 @@ final class SelectionPointerRenderingTests: XCTestCase {
         try withSelection { view, _, _ in
             let pointer = try XCTUnwrap(find("selection-pointer-overlay", in: view))
             let magnifier = try XCTUnwrap(find("selection-magnifier", in: view))
-            let shade = try XCTUnwrap(find("selection-drawing-overlay", in: view))
+            let drawing = try XCTUnwrap(find("selection-drawing-overlay", in: view))
+            let shade = try XCTUnwrap(view.layer!.sublayers?.first { $0.name == "selection-shade" } as? CAShapeLayer)
+            let border = try XCTUnwrap(view.layer!.sublayers?.first { $0.name == "selection-border" } as? CAShapeLayer)
             let start = CGPoint(x: 80, y: 60), end = CGPoint(x: 720, y: 440)
             move(start, in: view)
             XCTAssertEqual(magnifier.frame.height, 208)
@@ -131,8 +137,14 @@ final class SelectionPointerRenderingTests: XCTestCase {
             XCTAssertNil(view.currentColorValue)
             XCTAssertFalse(pointer.isHidden)
             XCTAssertEqual(magnifier.frame.height, 160)
+            drawing.needsDisplay = false
             view.mouseDragged(with: try mouse(.leftMouseDragged, at: end, in: view))
-            XCTAssertTrue(shade.layer!.needsDisplay())
+            XCTAssertFalse(drawing.layer!.needsDisplay(), "Plain selection drag must not rasterize the full-screen drawing view")
+            XCTAssertTrue(drawing.isHidden)
+            XCTAssertEqual(try XCTUnwrap(border.path).boundingBoxOfPath, CGRect(x: 80, y: 60, width: 640, height: 380))
+            XCTAssertEqual(shade.fillRule, .evenOdd)
+            XCTAssertFalse(try XCTUnwrap(shade.path).contains(CGPoint(x: 400, y: 250), using: .evenOdd))
+            XCTAssertTrue(try XCTUnwrap(shade.path).contains(CGPoint(x: 40, y: 40), using: .evenOdd))
             XCTAssertFalse(pointer.isHidden)
             XCTAssertEqual(magnifier.frame.height, 160)
             view.mouseUp(with: try mouse(.leftMouseUp, at: end, in: view))

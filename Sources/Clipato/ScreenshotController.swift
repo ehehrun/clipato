@@ -110,6 +110,17 @@ final class ScreenshotController: ObservableObject {
                 }
                 let image = try await snapshot(display: display, screen: screen, excluding: excludedApplications)
                 guard !selectionCancelled, !Task.isCancelled else { return nil }
+                let windowTargets: [SelectionWindowTarget]
+                if case .screenshot = mode, !initialFullScreen {
+                    guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                                     kCGNullWindowID) as? [[String: Any]] else {
+                        throw CaptureError.windowListUnavailable
+                    }
+                    windowTargets = try SelectionWindowTarget.targets(in: windowInfo, displayFrame: display.frame,
+                                                                      shareableWindowIDs: Set(content.windows.filter(\.isOnScreen).map(\.windowID)))
+                } else {
+                    windowTargets = []
+                }
 
                 let selection = await withCheckedContinuation { continuation in
                     selectionContinuation = continuation
@@ -122,7 +133,7 @@ final class ScreenshotController: ObservableObject {
                     window.acceptsMouseMovedEvents = true
                     let view = SelectionView(image: image, frame: CGRect(origin: .zero, size: screen.frame.size), mode: mode,
                                              initialFullScreen: initialFullScreen, recordingMode: recordingMode,
-                                             tag: tag, allowsTagSelection: allowsTagSelection)
+                                             tag: tag, allowsTagSelection: allowsTagSelection, windowTargets: windowTargets)
                     view.onRenderError = { [weak self] error in
                         guard let self, self.selectionRequestID == requestID else { return }
                         self.selectionError = error
@@ -259,12 +270,13 @@ final class ScreenshotController: ObservableObject {
     }
 
     private enum CaptureError: LocalizedError {
-        case alreadyCapturing, displayUnavailable
+        case alreadyCapturing, displayUnavailable, windowListUnavailable
         case displayNotFound(CGDirectDisplayID)
         var errorDescription: String? {
             switch self {
             case .alreadyCapturing: return L("屏幕捕获或选区正在进行。")
             case .displayUnavailable: return L("当前显示器已断开或无法访问，请重新选择屏幕。")
+            case .windowListUnavailable: return L("无法读取窗口列表，请重试截图。")
             case .displayNotFound(let id): return L("显示器 \(id) 不存在或已断开，请重新选择屏幕。")
             }
         }

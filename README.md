@@ -71,7 +71,7 @@ Clipato continues running in the menu bar after you close the Console. To quit c
 
 1. Move the pointer to the display you want to capture, then press `F1` or choose **Capture Area** from the menu.
 2. Before selecting an area, use the pixel magnifier and color value beside the pointer. Press `C` to copy the value or `Tab` to switch between HEX, RGB, and HSL. After copying, continue selecting an area or press `Esc` to exit.
-3. Drag to create a selection; this hides the color information. After releasing the mouse, drag inside the selection to move it, or drag an edge handle to resize it.
+3. Hover over a fully visible window to highlight its border, then click to select the whole window. You can also drag to create a free selection, including when a window is highlighted. Partly covered windows and windows spanning displays use manual selection. Selecting an area hides the color information. After releasing the mouse, drag inside the selection to move it, or drag an edge handle to resize it.
 4. Add annotations with the floating toolbar, or finish the screenshot directly.
 5. Copy, save, or pin the image. When you are not entering text, press `Enter` to finish and copy, or `Esc` to cancel.
 
