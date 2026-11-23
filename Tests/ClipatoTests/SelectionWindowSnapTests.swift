@@ -132,8 +132,22 @@ final class SelectionWindowSnapTests: XCTestCase {
         XCTAssertNil(view.hoveredWindow)
         XCTAssertEqual(view.selection, target.frame)
 
-        drag(from: CGPoint(x: 260, y: 180), to: CGPoint(x: 290, y: 200), in: view)
-        XCTAssertEqual(view.selection, CGRect(x: 150, y: 110, width: 280, height: 180))
+        let shade = try shape("selection-shade", in: view)
+        let drawing = try control("selection-drawing-overlay", in: view)
+        let start = CGPoint(x: 260, y: 180), end = CGPoint(x: 290, y: 200)
+        view.mouseDown(with: mouse(.leftMouseDown, at: start, in: view))
+        for _ in 0..<3 {
+            view.mouseDragged(with: mouse(.leftMouseDragged, at: end, in: view))
+            XCTAssertEqual(view.selection, CGRect(x: 150, y: 110, width: 280, height: 180))
+            XCTAssertEqual(shade.fillRule, .evenOdd)
+            XCTAssertEqual(try XCTUnwrap(shade.fillColor).alpha, 0.4, accuracy: 0.01)
+            XCTAssertEqual(shade.opacity, 1)
+            let path = try XCTUnwrap(shade.path)
+            XCTAssertTrue(path.contains(CGPoint(x: 130, y: 100), using: .evenOdd))
+            XCTAssertFalse(path.contains(CGPoint(x: 420, y: 280), using: .evenOdd))
+            XCTAssertTrue(drawing.isHidden)
+        }
+        view.mouseUp(with: mouse(.leftMouseUp, at: end, in: view))
         drag(from: CGPoint(x: 430, y: 290), to: CGPoint(x: 450, y: 320), in: view)
 
         XCTAssertEqual(view.selection, CGRect(x: 150, y: 110, width: 300, height: 210))

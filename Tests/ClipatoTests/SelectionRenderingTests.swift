@@ -33,19 +33,25 @@ final class SelectionRenderingTests: XCTestCase {
                 try drag(from: CGPoint(x: 80, y: 60), to: CGPoint(x: 350, y: 260), in: view)
                 let bitmap = try snapshot(view, scale: scale)
                 let overlay = try XCTUnwrap(find("selection-drawing-overlay", in: view))
-                let overlayBitmap = try snapshot(overlay, scale: scale)
+                // Shade is retained separately; the markup layer stays hidden when there are no annotations.
+                let shade = try XCTUnwrap(view.layer!.sublayers?.first { $0.name == "selection-shade" } as? CAShapeLayer)
                 let oldCenter = CGPoint(x: 200, y: 150), newCenter = CGPoint(x: 500, y: 370)
                 try assertColor(Self.colors[0], at: oldCenter, in: bitmap, scale: scale)
-                XCTAssertEqual(try pixel(oldCenter, in: overlayBitmap, scale: scale).alphaComponent, 0, accuracy: 0.01)
+                XCTAssertFalse(try XCTUnwrap(shade.path).contains(oldCenter, using: .evenOdd))
+                XCTAssertTrue(overlay.isHidden)
 
                 try drag(from: oldCenter, to: newCenter, in: view)
                 for _ in 0..<3 {
-                    try renderLayers(overlay, to: overlayBitmap)
                     try renderLayers(view, to: bitmap)
                     try assertColor(Self.colors[0], shade: 0.6, at: oldCenter, in: bitmap, scale: scale)
                     try assertColor(Self.colors[3], at: newCenter, in: bitmap, scale: scale)
-                    XCTAssertEqual(try pixel(oldCenter, in: overlayBitmap, scale: scale).alphaComponent, 0.4, accuracy: 0.01)
-                    XCTAssertEqual(try pixel(newCenter, in: overlayBitmap, scale: scale).alphaComponent, 0, accuracy: 0.01)
+                    XCTAssertEqual(shade.fillRule, .evenOdd)
+                    XCTAssertEqual(try XCTUnwrap(shade.fillColor).alpha, 0.4, accuracy: 0.01)
+                    XCTAssertEqual(shade.opacity, 1)
+                    let path = try XCTUnwrap(shade.path)
+                    XCTAssertTrue(path.contains(oldCenter, using: .evenOdd))
+                    XCTAssertFalse(path.contains(newCenter, using: .evenOdd))
+                    XCTAssertTrue(overlay.isHidden)
                 }
             }
         }
