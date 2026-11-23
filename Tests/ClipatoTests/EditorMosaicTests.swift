@@ -35,6 +35,7 @@ final class EditorMosaicTests: XCTestCase {
         let points = [CGPoint(x: 100, y: 150), CGPoint(x: 160, y: 180), CGPoint(x: 240, y: 220)]
         for scale in [CGFloat(0.25), 0.5, 2] {
             let canvas = try canvas(scale: scale)
+            canvas.mosaicShape = .brush
             canvas.mosaicBrushSize = 80
             canvas.mosaicSize = 24
             var added: [ImageAnnotation] = []
@@ -51,6 +52,7 @@ final class EditorMosaicTests: XCTestCase {
 
     func testClickPaintsOneBrushDotButDoesNotCommitEmptyRectangle() throws {
         let canvas = try canvas()
+        canvas.mosaicShape = .brush
         let point = CGPoint(x: 100, y: 100)
         paint([point], in: canvas)
         let dot = try XCTUnwrap(canvas.annotations.first)
@@ -63,7 +65,6 @@ final class EditorMosaicTests: XCTestCase {
 
     func testRectangleKeepsOnlyEndpointsAndClampsToImage() throws {
         let canvas = try canvas()
-        canvas.mosaicShape = .rectangle
         paint([CGPoint(x: 100, y: 100), CGPoint(x: 150, y: 200), CGPoint(x: 1000, y: 900)], in: canvas)
         let rectangle = try XCTUnwrap(canvas.annotations.first)
         XCTAssertEqual(rectangle.mosaicShape, .rectangle)
@@ -73,6 +74,7 @@ final class EditorMosaicTests: XCTestCase {
 
     func testPaintingOverExistingMarkupAddsAnotherStrokeAndUndoKeepsEarlierLayers() throws {
         let canvas = try canvas()
+        canvas.mosaicShape = .brush
         let point = CGPoint(x: 100, y: 100)
         let text = ImageAnnotation(tool: .text, points: [point], color: .red, width: 0,
                                    text: "原有文字", fontSize: 24, textWidth: 200)

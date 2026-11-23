@@ -1099,27 +1099,11 @@
 
 "关于与更新" = "About & Updates";
 "当前版本" = "Current Version";
-"所有更新地址均检查失败：" = "All update URLs failed:";
-"此版本暂未配置更新服务。" = "The update service is not configured for this version.";
-"应用内的更新服务配置无效。" = "The app’s update service configuration is invalid.";
 "检查更新" = "Check for Updates";
 "检查更新…" = "Check for Updates…";
 "正在检查…" = "Checking…";
 "当前已是最新版本" = "You’re up to date";
-"发现新版本 %@（构建 %lld）" = "Version %@ is available (build %lld)";
 "前往下载" = "Go to Download";
-"无法打开下载地址：%@" = "Could not open the download URL: %@";
-"更新配置地址必须是有效的 HTTPS 地址，且不能包含账号或密码。" = "The update manifest URL must be a valid HTTPS URL without a username or password.";
-"当前应用的版本号或构建号无效。" = "The installed app’s version or build number is invalid.";
-"更新服务器返回了无效的 HTTPS 响应。" = "The update server returned an invalid HTTPS response.";
-"更新服务器返回 HTTP %lld。" = "The update server returned HTTP %lld.";
-"更新配置不是有效的 JSON，或缺少必要字段。" = "The update manifest is not valid JSON or is missing required fields.";
-"更新版本号须为 major.minor.patch 格式，例如 1.0.0。" = "The update version must use major.minor.patch format, such as 1.0.0.";
-"更新构建号必须是大于 0 的整数。" = "The update build number must be an integer greater than 0.";
-"更新下载地址必须是有效的 HTTPS 地址，且不能包含账号或密码。" = "The download URL must be a valid HTTPS URL without a username or password.";
-"今日更新请求已达 5 次，暂无成功缓存，请明天再试。" = "Today’s limit of 5 update requests has been reached. No successful result is cached. Please try again tomorrow.";
-"上次成功的更新检查结果无法读取。" = "The last successful update check result could not be read.";
-"今日更新请求已达 5 次，显示上次成功检查的结果（%@）。" = "Today’s limit of 5 update requests has been reached. Showing the last successful result (%@).";
 "关于 Clipato…" = "About Clipato…";
 
 "安全设置" = "Security Settings";
@@ -1292,3 +1276,26 @@
 "已折叠" = "Collapsed";
 "无法读取窗口列表，请重试截图。" = "Unable to read the window list. Try taking the screenshot again.";
 "单击选窗 · 拖动框选" = "Click window · Drag area";
+
+// Screenshot QR code recognition
+"识别二维码" = "Recognize QR Code";
+"正在识别二维码…" = "Recognizing QR codes…";
+"未识别到二维码，请调整选区后重试。" = "No QR code found. Adjust the selection and try again.";
+"二维码内容已复制" = "QR code contents copied";
+"已复制 %lld 个二维码的内容" = "Copied contents from %lld QR codes";
+"无法识别二维码：%@" = "Unable to recognize QR codes: %@";
+"无法复制二维码内容到剪贴板。" = "Unable to copy QR code contents to the clipboard.";
+"二维码中没有可复制的文本。" = "The QR code contains no text to copy.";
+"二维码识别未返回结果。" = "QR code recognition returned no results.";
+
+"发现新版本 %@" = "A new version is available: %@";
+"无法检查更新" = "Unable to Check for Updates";
+"无法访问 GitHub 更新信息，请前往 Clipato 仓库查看最新版本并手动更新。" = "Unable to access GitHub update information. Visit the Clipato repository to check the latest version and update manually.";
+"前往仓库" = "Go to Repository";
+"稍后" = "Later";
+"无法打开仓库地址：%@" = "Unable to open repository URL: %@";
+"GitHub 返回了无效的更新响应。" = "GitHub returned an invalid update response.";
+"GitHub 返回 HTTP %lld，请前往仓库手动检查更新。" = "GitHub returned HTTP %lld. Check the repository for updates manually.";
+"GitHub 标签数据无效。" = "GitHub tag data is invalid.";
+"GitHub 仓库中没有可比较的正式版本标签。" = "The GitHub repository has no comparable stable version tags.";
+"当前应用的版本号无效。" = "The current application version is invalid.";

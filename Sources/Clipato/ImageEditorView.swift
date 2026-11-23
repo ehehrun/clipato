@@ -13,7 +13,7 @@ struct ImageEditorView: View {
     @State private var changes: [AnnotationChange] = []
     @State private var undone: [AnnotationChange] = []
     @State private var fontSize: CGFloat = 48
-    @State private var mosaicShape = MosaicShape.brush
+    @State private var mosaicShape = MosaicShape.rectangle
     @State private var mosaicBrushSize: CGFloat = 48
     @State private var mosaicSize: CGFloat = 16
     @State private var canvas: EditorImageCanvas?

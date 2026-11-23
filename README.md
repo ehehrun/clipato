@@ -75,6 +75,8 @@ Clipato continues running in the menu bar after you close the Console. To quit c
 4. Add annotations with the floating toolbar, or finish the screenshot directly.
 5. Copy, save, or pin the image. When you are not entering text, press `Enter` to finish and copy, or `Esc` to cancel.
 
+Click **Recognize QR Code** in the screenshot toolbar to copy the text from QR codes inside the selection. Multiple results are copied on separate lines. The selection closes after copying succeeds; if no QR code is found, adjust it and try again. Recognition happens on your Mac and does not open links or save a screenshot.
+
 Color values come from the original screenshot pixels in sRGB. HEX is the default; choose HEX, RGB, or HSL under **System Settings → Screenshots & Color Picking → Default Color Format**. Switching with `Tab` applies only to the current screenshot and does not change that default.
 
 The full-screen crosshair is on by default. Turn it off or on under **System Settings → Screenshots & Color Picking → Show Full-Screen Crosshair**.
@@ -350,9 +352,9 @@ Cleaning up media moves its files to the system Trash. Selecting only collection
 
 Open **System Settings → About & Updates** to view the current version and click **Check for Updates**.
 
-When a new version is available, read the release notes and click **Go to Download**. Update checks run only when you request them; new versions are not installed automatically.
+Clipato compares its version with the highest stable `vMAJOR.MINOR.PATCH` tag in the [GitHub repository](https://github.com/ehehrun/clipato); Nightly tags are excluded. When a new version is available, click **Go to Download** to open GitHub Releases and download it. Update checks run only when you request them; new versions are not installed automatically.
 
-Each Mac can make up to **5 HTTP update requests per local calendar day**, resetting at midnight. Failed requests, each backup URL, and HTTPS redirects each count toward the limit; restarting the app does not reset it. After the limit is reached, Clipato shows the last successful result with its check time, including an “up to date” result. Failed checks do not replace that cache. If no successful result is cached, Clipato asks you to try again the next day.
+If GitHub cannot be reached, a dialog offers **Go to Repository** so you can check for updates manually. Clipato no longer uses a separate update JSON file, backup sources, or the previous daily request limit and result cache.
 
 ## AI collaboration
 

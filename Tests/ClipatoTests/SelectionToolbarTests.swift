@@ -374,7 +374,7 @@ final class SelectionToolbarTests: XCTestCase {
         let view = try makeView()
         let region = view.selection
         try press("mosaic", in: view)
-        click(CGPoint(x: 130, y: 110), in: view)
+        drag(from: CGPoint(x: 130, y: 110), to: CGPoint(x: 200, y: 170), in: view)
         let originals = view.annotations
         var finished = false
         view.onFinish = { _, _ in finished = true }
@@ -397,6 +397,9 @@ final class SelectionToolbarTests: XCTestCase {
     func testMosaicDotUsesSourcePixelBrushWidthAndIndependentBlockSize() throws {
         let view = try makeView()
         try press("mosaic", in: view)
+        let shape: NSSegmentedControl = try control("mosaic-shape", in: view)
+        shape.selectedSegment = MosaicShape.allCases.firstIndex(of: .brush)!
+        send(shape)
         let brush: NSPopUpButton = try control("mosaic-brush-size", in: view)
         let blocks: NSPopUpButton = try control("mosaic-block-size", in: view)
         brush.selectItem(withTitle: "48 pt")
@@ -421,8 +424,7 @@ final class SelectionToolbarTests: XCTestCase {
         try press("mosaic", in: view)
         let shape: NSSegmentedControl = try control("mosaic-shape", in: view)
         let brush: NSPopUpButton = try control("mosaic-brush-size", in: view)
-        shape.selectedSegment = MosaicShape.allCases.firstIndex(of: .rectangle)!
-        send(shape)
+        XCTAssertEqual(shape.selectedSegment, MosaicShape.allCases.firstIndex(of: .rectangle))
         XCTAssertFalse(brush.isEnabled)
         drag(from: CGPoint(x: 130, y: 110), to: CGPoint(x: 250, y: 200), in: view)
         XCTAssertEqual(view.annotations.count, 1)
@@ -444,6 +446,9 @@ final class SelectionToolbarTests: XCTestCase {
     func testMosaicCanPaintOverExistingStrokeWithoutSelectingOrFinishingCapture() throws {
         let view = try makeView()
         try press("mosaic", in: view)
+        let shape: NSSegmentedControl = try control("mosaic-shape", in: view)
+        shape.selectedSegment = MosaicShape.allCases.firstIndex(of: .brush)!
+        send(shape)
         let hit = CGPoint(x: 180, y: 150)
         click(hit, in: view)
         let first = try XCTUnwrap(view.annotations.first)
@@ -461,7 +466,7 @@ final class SelectionToolbarTests: XCTestCase {
         let view = try makeView()
         let region = view.selection
         try press("mosaic", in: view)
-        click(CGPoint(x: 130, y: 110), in: view)
+        drag(from: CGPoint(x: 130, y: 110), to: CGPoint(x: 200, y: 170), in: view)
         drag(from: CGPoint(x: 350, y: 200), to: CGPoint(x: 450, y: 300), in: view)
         let originals = view.annotations
         XCTAssertEqual(originals.count, 2)

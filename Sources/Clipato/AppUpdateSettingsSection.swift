@@ -55,20 +55,23 @@ struct AppUpdateSettingsSection: View {
                         .consoleFont(12).foregroundStyle(Palette.muted)
                         .accessibilityIdentifier("update-result")
                 case .failed(let message):
-                    Label(message, systemImage: "exclamationmark.triangle")
-                        .consoleFont(12).foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("update-result")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(message, systemImage: "exclamationmark.triangle")
+                            .consoleFont(12).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(L("前往仓库"), action: model.openUpdateRepository)
+                            .buttonStyle(QuietButtonStyle())
+                            .accessibilityIdentifier("open-update-repository")
+                    }
+                    .accessibilityIdentifier("update-result")
                 case .available(let release):
                     VStack(alignment: .leading, spacing: 10) {
-                        Label(L("发现新版本 \(release.version)（构建 \(release.build)）"), systemImage: "arrow.down.circle")
+                        Label(L("发现新版本 \(release.name)"), systemImage: "arrow.down.circle")
                             .consoleFont(13, weight: .semibold)
-                        Text(release.releaseNotes)
-                            .consoleFont(12).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
                         Button(L("前往下载")) {
-                            if !NSWorkspace.shared.open(release.downloadURL) {
-                                model.errorMessage = L("无法打开下载地址：\(release.downloadURL.absoluteString)")
+                            let url = AppUpdateChecker.releasesURL
+                            if !NSWorkspace.shared.open(url) {
+                                model.errorMessage = L("无法打开下载地址：\(url.absoluteString)")
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -76,14 +79,6 @@ struct AppUpdateSettingsSection: View {
                     }
                     .accessibilityIdentifier("update-result")
                     .padding(.vertical, 4)
-                }
-                if let cachedAt = model.updateCheckCachedAt {
-                    let date = cachedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened)
-                        .locale(LanguageSettings.shared.locale))
-                    Text(L("今日更新请求已达 5 次，显示上次成功检查的结果（\(date)）。"))
-                        .consoleFont(11).foregroundStyle(Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("update-cache-notice")
                 }
             }
         }

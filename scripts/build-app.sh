@@ -115,7 +115,6 @@ cp "$project_dir/Resources/AppIcon.icns" "$stage_app/Contents/Resources/AppIcon.
 cp -R "$binary_dir/Clipato_Clipato.bundle" "$stage_app/Contents/Resources/Clipato_Clipato.bundle"
 if [ "$channel" = app-store ]; then
     rm -r "$stage_app/Contents/Resources/Clipato_Clipato.bundle/Skills"
-    rm "$stage_app/Contents/Resources/Clipato_Clipato.bundle/UpdateSources.plist"
 fi
 cp "$project_dir/LICENSE" "$stage_app/Contents/Resources/LICENSE"
 cp "$project_dir/Resources/PrivacyInfo.xcprivacy" "$stage_app/Contents/Resources/PrivacyInfo.xcprivacy"

@@ -121,7 +121,6 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var updateCheckState = UpdateCheckState.idle
-    @Published private(set) var updateCheckCachedAt: Date?
     private var updateCheckTask: Task<Void, Never>?
     @Published var selected: Set<UUID> = [] { didSet { updateStorageProtection() } }
     @Published var query = ""
@@ -304,30 +303,27 @@ final class AppModel: ObservableObject {
     }
 
     func checkForUpdates() {
-        guard updateCheckState != .checking else { return }
-        updateCheckCachedAt = nil
-        let urls: [URL]
-        do {
-            urls = try AppUpdateChecker.configuredURLs()
-            guard !urls.isEmpty else { throw AppUpdateError.noManifestURLs }
-        } catch {
-            updateCheckState = .failed(error.localizedDescription)
-            return
-        }
+        guard !DistributionChannel.isAppStore, updateCheckState != .checking else { return }
         updateCheckState = .checking
         updateCheckTask = Task { [weak self] in
+            defer { self?.updateCheckTask = nil }
             do {
-                let result = try await AppUpdateChecker.shared.check(at: urls)
+                let release = try await AppUpdateChecker.shared.check()
                 guard !Task.isCancelled else { return }
-                self?.updateCheckCachedAt = result.cachedAt
-                self?.updateCheckState = result.release.map(UpdateCheckState.available) ?? .upToDate
+                self?.updateCheckState = release.map(UpdateCheckState.available) ?? .upToDate
             } catch is CancellationError {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.updateCheckState = .failed(error.localizedDescription)
             }
-            self?.updateCheckTask = nil
+        }
+    }
+
+    func openUpdateRepository() {
+        let url = AppUpdateChecker.repositoryURL
+        if !NSWorkspace.shared.open(url) {
+            errorMessage = L("无法打开仓库地址：\(url.absoluteString)")
         }
     }
 

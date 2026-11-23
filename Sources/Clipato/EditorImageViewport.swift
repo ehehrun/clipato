@@ -8,7 +8,7 @@ struct EditorImageViewport: NSViewRepresentable {
     let color: NSColor
     var allowsAnnotation = true
     var fontSize: CGFloat = 48
-    var mosaicShape = MosaicShape.brush
+    var mosaicShape = MosaicShape.rectangle
     var mosaicBrushSize: CGFloat = 48
     var mosaicSize: CGFloat = 16
     var onAnnotationChange: (AnnotationChange) -> Void = { _ in }
@@ -190,7 +190,7 @@ final class EditorImageCanvas: NSView {
         }
     }
     var color = NSColor.red
-    var mosaicShape = MosaicShape.brush
+    var mosaicShape = MosaicShape.rectangle
     var mosaicBrushSize: CGFloat = 48
     var mosaicSize: CGFloat = 16
     var onAnnotation: (ImageAnnotation) -> Void = { _ in }

@@ -109,6 +109,9 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         model.$errorMessage.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] message in
             self?.presentError(message)
         }.store(in: &subscriptions)
+        model.$updateCheckState.receive(on: RunLoop.main).sink { [weak self] state in
+            if case .failed(let message) = state { self?.presentUpdateFailure(message) }
+        }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .clipatoShowScreenCapturePermissions, object: model)
             .receive(on: RunLoop.main).sink { [weak self] _ in
                 self?.showConsoleWindow()
@@ -355,6 +358,19 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         alert.addButton(withTitle: L("知道了"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    private func presentUpdateFailure(_ message: String) {
+        isPresentingError = true
+        defer { isPresentingError = false }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("无法检查更新")
+        alert.informativeText = L("无法访问 GitHub 更新信息，请前往 Clipato 仓库查看最新版本并手动更新。") + "\n\n" + message
+        alert.addButton(withTitle: L("前往仓库"))
+        alert.addButton(withTitle: L("稍后"))
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { model.openUpdateRepository() }
     }
 
     @discardableResult

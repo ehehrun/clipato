@@ -52,6 +52,11 @@ final class SelectionView: NSView {
     private let colorSampler = Result { try ScreenPixelColorSampler() }
     private let toolbar = NSVisualEffectView()
     private let toolbarStack = NSStackView()
+    private let qrCodeStatus = NSVisualEffectView()
+    private let qrCodeStatusIcon = NSImageView()
+    private let qrCodeStatusMessage = NSTextField(wrappingLabelWithString: "")
+    private(set) var qrCodeTask: Task<Void, Never>?
+    private var qrCodeSelection: CGRect?
     private let colorPalette = NSVisualEffectView()
     private let mosaicOptions = NSVisualEffectView()
     private let mosaicShapePicker = SelectionSegmentedControl()
@@ -60,7 +65,7 @@ final class SelectionView: NSView {
     private let recordingModePicker = SelectionSegmentedControl()
     private let tagPicker = NativeAssetTagPicker()
     private let allowsTagSelection: Bool
-    private var mosaicShape = MosaicShape.brush
+    private var mosaicShape = MosaicShape.rectangle
     private var mosaicBrushSize: CGFloat = 24
     private var mosaicSize: CGFloat = 16
     private var mosaicRenderer: MosaicRenderer?
@@ -145,11 +150,28 @@ final class SelectionView: NSView {
         pointerOverlay.magnifier.selectionView = self
         addSubview(pointerOverlay)
         buildToolbar()
+        qrCodeStatus.identifier = NSUserInterfaceItemIdentifier("qr-code-status")
+        qrCodeStatus.material = .popover
+        qrCodeStatus.blendingMode = .withinWindow
+        qrCodeStatus.state = .active
+        qrCodeStatus.wantsLayer = true
+        qrCodeStatus.layer!.cornerRadius = 6
+        qrCodeStatus.isHidden = true
+        qrCodeStatusIcon.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
+        qrCodeStatusIcon.contentTintColor = .systemRed
+        qrCodeStatusIcon.setAccessibilityElement(false)
+        qrCodeStatus.addSubview(qrCodeStatusIcon)
+        qrCodeStatusMessage.identifier = NSUserInterfaceItemIdentifier("qr-code-status-message")
+        qrCodeStatusMessage.font = .systemFont(ofSize: 12)
+        qrCodeStatusMessage.maximumNumberOfLines = 3
+        qrCodeStatus.addSubview(qrCodeStatusMessage)
+        addSubview(qrCodeStatus)
         NotificationCenter.default.addObserver(self, selector: #selector(updateLanguage), name: .clipatoLanguageDidChange, object: nil)
         if initialFullScreen { selection = bounds }
         updateSelection()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
+    deinit { qrCodeTask?.cancel() }
 
     static func prepareInterface() {
         autoreleasepool {
@@ -196,6 +218,8 @@ final class SelectionView: NSView {
             updateColorSample()
             updateHoveredWindow()
             updatePointerOverlay()
+        } else {
+            clearQRCodeStatus()
         }
     }
 
@@ -562,6 +586,7 @@ final class SelectionView: NSView {
     private func isOverToolbar(_ point: CGPoint) -> Bool {
         (!toolbar.isHidden && toolbar.frame.contains(point)) || (!colorPalette.isHidden && colorPalette.frame.contains(point))
             || (!mosaicOptions.isHidden && mosaicOptions.frame.contains(point))
+            || (!qrCodeStatus.isHidden && qrCodeStatus.frame.contains(point))
     }
     private func textIndex(at point: CGPoint) -> Int? {
         let pixel = annotationPoint(point)
@@ -580,6 +605,7 @@ final class SelectionView: NSView {
     }
 
     @objc private func updateLanguage() {
+        clearQRCodeStatus()
         tagPicker.updateLanguage()
         let showingColors = !colorPalette.isHidden
         for container in [toolbar, colorPalette, mosaicOptions] {
@@ -673,6 +699,9 @@ final class SelectionView: NSView {
             stack.addArrangedSubview(fontSizePicker)
             button("undo", L("撤销 ⌘Z"), "arrow.uturn.backward", #selector(undo))
             button("redo", L("重做 ⇧⌘Z"), "arrow.uturn.forward", #selector(redo))
+            if allowsDestinationActions {
+                button("qr-code", L("识别二维码"), "qrcode.viewfinder", #selector(recognizeQRCode))
+            }
             addTagPicker()
             button("cancel", L("取消 Esc"), "xmark", #selector(cancel))
             if allowsDestinationActions {
@@ -842,6 +871,7 @@ final class SelectionView: NSView {
     }
 
     private func updateSelection() {
+        if let qrCodeSelection, qrCodeSelection != selection { clearQRCodeStatus() }
         toolbar.isHidden = selection.isEmpty || (drag != nil && !isDraggingText)
         if toolbar.isHidden { colorPalette.isHidden = true }
         if !toolbar.isHidden {
@@ -872,12 +902,84 @@ final class SelectionView: NSView {
             let y = below + mosaicOptions.frame.height <= bounds.height - 8 ? below : toolbar.frame.minY - mosaicOptions.frame.height - 6
             mosaicOptions.setFrameOrigin(CGPoint(x: x, y: max(8, y)))
         }
+        layoutQRCodeStatus()
         updateCursor()
         updatePointerOverlay()
         updateSelectionGeometry()
         let hasAnnotationDrawing = !selection.isEmpty && (!annotations.isEmpty || currentAnnotation != nil || renderingFailed)
         drawingOverlay.isHidden = !hasAnnotationDrawing
         drawingOverlay.needsDisplay = hasAnnotationDrawing
+    }
+
+    @objc private func recognizeQRCode() {
+        guard !finished, !renderingFailed, !selection.isEmpty, drag == nil, qrCodeTask == nil else { return }
+        finishTextEditing()
+        tool = nil
+        selectedAnnotationIndex = nil
+        colorPalette.isHidden = true
+        updateSelection()
+        qrCodeSelection = selection
+        showQRCodeStatus(L("正在识别二维码…"))
+        buttons["qr-code"]!.isEnabled = false
+        qrCodeTask = Task { [weak self, image, crop = pixelSelection] in
+            do {
+                guard let cropped = image.cropping(to: crop) else { throw AnnotationRenderError.invalidCrop }
+                let contents = try await QRCodeRecognition.contents(in: cropped)
+                try Task.checkCancellation()
+                guard let self, !self.finished else { return }
+                if contents.isEmpty {
+                    self.showQRCodeStatus(L("未识别到二维码，请调整选区后重试。"), warning: true)
+                } else {
+                    self.colorPasteboard.clearContents()
+                    if self.colorPasteboard.setString(contents.joined(separator: "\n"), forType: .string) {
+                        self.cancel()
+                        return
+                    } else {
+                        self.showQRCodeStatus(L("无法复制二维码内容到剪贴板。"), warning: true)
+                    }
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, let self, !self.finished else { return }
+                self.showQRCodeStatus(L("无法识别二维码：\(error.localizedDescription)"), warning: true)
+            }
+            guard let self else { return }
+            self.qrCodeTask = nil
+            self.buttons["qr-code"]!.isEnabled = true
+        }
+    }
+
+    private func clearQRCodeStatus() {
+        qrCodeTask?.cancel()
+        qrCodeTask = nil
+        qrCodeSelection = nil
+        qrCodeStatus.isHidden = true
+        buttons["qr-code"]?.isEnabled = true
+    }
+
+    private func showQRCodeStatus(_ message: String, warning: Bool = false) {
+        qrCodeStatusMessage.stringValue = message
+        qrCodeStatusMessage.textColor = warning ? .systemRed : .labelColor
+        qrCodeStatusMessage.toolTip = message
+        qrCodeStatusIcon.isHidden = !warning
+        let leading: CGFloat = warning ? 30 : 10
+        let width = max(1, min(380, bounds.width - leading - 26))
+        let size = qrCodeStatusMessage.cell!.cellSize(forBounds: CGRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude))
+        qrCodeStatusMessage.frame = CGRect(x: leading, y: 6, width: min(width, size.width), height: size.height)
+        qrCodeStatus.frame.size = CGSize(width: qrCodeStatusMessage.frame.maxX + 10, height: size.height + 12)
+        qrCodeStatusIcon.frame = CGRect(x: 10, y: max(6, size.height - 8), width: 14, height: 14)
+        layoutQRCodeStatus()
+    }
+
+    private func layoutQRCodeStatus() {
+        qrCodeStatus.isHidden = qrCodeSelection == nil || toolbar.isHidden
+        guard !qrCodeStatus.isHidden else { return }
+        let x = min(max(toolbar.frame.maxX - qrCodeStatus.frame.width, 8), max(8, bounds.width - qrCodeStatus.frame.width - 8))
+        let below = toolbar.frame.maxY + 6
+        let above = toolbar.frame.minY - qrCodeStatus.frame.height - 6
+        let y = below + qrCodeStatus.frame.height <= bounds.height - 8 ? below : max(8, above)
+        qrCodeStatus.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
     private func updateSelectionGeometry() {
@@ -966,6 +1068,7 @@ final class SelectionView: NSView {
     }
     @objc private func cancel() {
         guard !finished else { return }
+        clearQRCodeStatus()
         finished = true
         hoveredWindow = nil
         pressedWindow = nil
@@ -978,6 +1081,7 @@ final class SelectionView: NSView {
     @objc private func confirm() { finish(.copy) }
     private func finish(_ action: ScreenshotAction) {
         guard !finished, !renderingFailed, !selection.isEmpty, drag == nil else { return }
+        clearQRCodeStatus()
         finishTextEditing()
         finished = true
         hoveredWindow = nil
