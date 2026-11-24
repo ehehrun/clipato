@@ -22,7 +22,7 @@ final class ScreenshotController: ObservableObject {
     private var selectionError: Error?
     private var selectionWindows: [NSWindow] = []
     private var selectionContinuation: CheckedContinuation<Selection?, Never>?
-    private var pinnedPanels: [UUID: NSPanel] = [:]
+    private var pinnedPanels: [UUID: PinnedImagePanel] = [:]
 
     func captureRegion(initialFullScreen: Bool = false, allowsDestinationActions: Bool = true, tag: AssetTag? = nil,
                        allowsTagSelection: Bool = true) async throws -> ScreenshotResult? {
@@ -221,9 +221,12 @@ final class ScreenshotController: ObservableObject {
     }
 
     @discardableResult
-    func pin(image: CGImage, frame: CGRect? = nil) -> NSPanel {
+    func pin(image: CGImage, frame: CGRect? = nil, pointSize: CGSize? = nil, origin: CGPoint? = nil,
+             onPositionChanged: ((CGPoint) -> Void)? = nil) -> NSPanel {
         let id = UUID()
-        let panel = PinnedImagePanel(image: image, frame: frame)
+        let panel = PinnedImagePanel(image: image, frame: frame, pointSize: pointSize, origin: origin)
+        panel.onPositionChanged = onPositionChanged
+        panel.rememberPosition()
         panel.onClose = { [weak self] in
             guard let self else { return }
             self.pinnedPanels.removeValue(forKey: id)
@@ -236,6 +239,25 @@ final class ScreenshotController: ObservableObject {
         if pinnedMousePassthrough { panel.orderFront(nil) }
         else { panel.makeKeyAndOrderFront(nil) }
         return panel
+    }
+
+    nonisolated static func pinnedImageFrame(imageSize: CGSize, frame: CGRect?, pointSize: CGSize?, origin: CGPoint? = nil,
+                                            visibleFrame: CGRect) -> CGRect {
+        if let frame { return frame }
+        if let pointSize { return CGRect(origin: origin ?? .zero, size: pointSize) }
+        let scale = min(1, 640 / imageSize.width, visibleFrame.height * 0.75 / imageSize.height)
+        return CGRect(origin: origin ?? .zero, size: CGSize(width: imageSize.width * scale, height: imageSize.height * scale))
+    }
+
+    nonisolated static func visiblePinnedImageFrame(_ frame: CGRect, on visibleFrames: [CGRect]) -> CGRect {
+        if visibleFrames.contains(where: { $0.intersects(frame) }) { return frame }
+        // A disconnected display must not leave the image outside every remaining screen.
+        let screen = visibleFrames.min { first, second in
+            hypot(first.midX - frame.midX, first.midY - frame.midY) < hypot(second.midX - frame.midX, second.midY - frame.midY)
+        }!
+        let x = min(max(frame.minX, screen.minX), max(screen.minX, screen.maxX - frame.width))
+        let y = min(max(frame.minY, screen.minY), max(screen.minY, screen.maxY - frame.height))
+        return CGRect(origin: CGPoint(x: x, y: y), size: frame.size)
     }
 
     func togglePinnedMousePassthrough() {
@@ -303,21 +325,24 @@ final class SelectionWindow: NSPanel {
 @MainActor
 private final class PinnedImagePanel: NSPanel {
     var onClose: (() -> Void)?
+    var onPositionChanged: ((CGPoint) -> Void)?
+    private var rememberedOrigin: CGPoint?
+    private let imageView: PinnedImageView
     override var canBecomeKey: Bool { !ignoresMouseEvents }
 
-    init(image: CGImage, frame: CGRect?) {
-        let initialFrame: CGRect
-        if let frame {
-            initialFrame = frame
-        } else {
-            let maximumHeight = NSScreen.main!.visibleFrame.height * 0.75
-            let scale = min(1, 640 / CGFloat(image.width), maximumHeight / CGFloat(image.height))
-            initialFrame = CGRect(x: 0, y: 0, width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+    init(image: CGImage, frame: CGRect?, pointSize: CGSize?, origin: CGPoint?) {
+        let visibleFrame = frame == nil && pointSize == nil ? NSScreen.main!.visibleFrame : CGRect.zero
+        var initialFrame = ScreenshotController.pinnedImageFrame(
+            imageSize: CGSize(width: image.width, height: image.height), frame: frame,
+            pointSize: pointSize, origin: origin, visibleFrame: visibleFrame)
+        if frame == nil, origin != nil {
+            initialFrame = ScreenshotController.visiblePinnedImageFrame(initialFrame, on: NSScreen.screens.map(\.visibleFrame))
         }
+        imageView = PinnedImageView(image: image, frame: CGRect(origin: .zero, size: initialFrame.size))
         super.init(contentRect: initialFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         animationBehavior = .none
         // AppKit rounds the initial rectangle outward; restore the selected image size.
-        if frame != nil { setFrame(initialFrame, display: false) }
+        if frame != nil || pointSize != nil || origin != nil { setFrame(initialFrame, display: false) }
         isReleasedWhenClosed = false
         isFloatingPanel = true
         becomesKeyOnlyIfNeeded = false
@@ -326,12 +351,24 @@ private final class PinnedImagePanel: NSPanel {
         level = .floating
         hasShadow = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        contentView = PinnedImageView(image: image, frame: CGRect(origin: .zero, size: initialFrame.size))
-        if frame == nil { center() }
+        imageView.onMove = { [weak self] in
+            self?.rememberPosition()
+        }
+        contentView = imageView
+        if frame == nil && origin == nil { center() }
+        rememberedOrigin = origin
         makeFirstResponder(contentView)
     }
 
+    func rememberPosition() {
+        guard let onPositionChanged, rememberedOrigin != frame.origin else { return }
+        rememberedOrigin = frame.origin
+        onPositionChanged(frame.origin)
+    }
+
     override func close() {
+        imageView.finishMoving()
+        onPositionChanged = nil
         super.close()
         let callback = onClose
         onClose = nil
@@ -342,6 +379,8 @@ private final class PinnedImagePanel: NSPanel {
 @MainActor
 private final class PinnedImageView: NSView {
     private let image: NSImage
+    var onMove: (() -> Void)?
+    private var dragStart: (offset: CGPoint, origin: CGPoint)?
     override var acceptsFirstResponder: Bool { true }
 
     init(image: CGImage, frame: CGRect) {
@@ -366,9 +405,31 @@ private final class PinnedImageView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func draw(_ dirtyRect: NSRect) { image.draw(in: bounds) }
     override func mouseDown(with event: NSEvent) {
-        window?.makeKey()
-        window?.makeFirstResponder(self)
-        if event.clickCount == 2 { window?.close() } else { window?.performDrag(with: event) }
+        guard let window else { return }
+        window.makeKey()
+        window.makeFirstResponder(self)
+        if event.clickCount == 2 {
+            dragStart = nil
+            window.close()
+        }
+        else { dragStart = (event.locationInWindow, window.frame.origin) }
+    }
+    override func mouseDragged(with event: NSEvent) {
+        moveImage(with: event)
+    }
+    override func mouseUp(with event: NSEvent) {
+        moveImage(with: event)
+        finishMoving()
+    }
+    func finishMoving() {
+        guard let dragStart else { return }
+        self.dragStart = nil
+        if let window, window.frame.origin != dragStart.origin { onMove?() }
+    }
+    private func moveImage(with event: NSEvent) {
+        guard let window, let dragStart else { return }
+        let pointer = window.convertPoint(toScreen: event.locationInWindow)
+        window.setFrameOrigin(CGPoint(x: pointer.x - dragStart.offset.x, y: pointer.y - dragStart.offset.y))
     }
     override func scrollWheel(with event: NSEvent) {
         guard let window else { return }

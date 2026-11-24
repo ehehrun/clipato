@@ -100,6 +100,8 @@ Pinning from the screenshot toolbar places the image at the current selection's 
 
 Pinned windows stay on top of other windows. Drag to move, scroll to resize, right-click to copy, and double-click or press `Esc` to close.
 
+New screenshots retain the original selection's screen size when pinned with **Pin Latest Image**, including after restarting Clipato. Each image also remembers its last pinned position, including changes made by dragging, across restarts. New screenshots first appear at the original selection position. Older screenshots do not contain size information; imported images, long screenshots, and other ordinary images continue to fit the screen automatically.
+
 Press `F5`, or select **Pinned Image Click-Through** from the menu bar menu, to send mouse actions through all pinned images to the windows underneath. Press it again or clear the menu item to interact with pinned images again. Customize this shortcut in **Keyboard Shortcuts**.
 
 `F5` is included on first launch and when restoring defaults. If you already saved a shortcut configuration, assign this new action in **Keyboard Shortcuts**; your existing bindings stay intact.

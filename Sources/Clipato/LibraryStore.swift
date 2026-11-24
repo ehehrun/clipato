@@ -13,6 +13,26 @@ struct VaultImage: Identifiable, Codable, Hashable {
     let source: String
     var directory: URL? = nil
     var tag: AssetTag? = nil
+    var pointWidth: Double? = nil
+    var pointHeight: Double? = nil
+    var pinX: Double? = nil
+    var pinY: Double? = nil
+
+    func validatePointSize() throws {
+        switch (pointWidth, pointHeight) {
+        case (nil, nil): return
+        case let (width?, height?) where width.isFinite && height.isFinite && width > 0 && height > 0: return
+        default: throw LibraryError.invalidPointSize
+        }
+    }
+
+    func validatePinPosition() throws {
+        switch (pinX, pinY) {
+        case (nil, nil): return
+        case let (x?, y?) where x.isFinite && y.isFinite: return
+        default: throw LibraryError.invalidPinPosition
+        }
+    }
 }
 
 struct SavedSession: Identifiable {
@@ -33,6 +53,8 @@ struct LibraryCleanupOptions {
 enum LibraryError: LocalizedError {
     case unreadableImage(String)
     case imageWrite
+    case invalidPointSize
+    case invalidPinPosition
     case invalidName
     case invalidTag(URL)
 
@@ -40,6 +62,8 @@ enum LibraryError: LocalizedError {
         switch self {
         case .unreadableImage(let name): return L("无法读取图片：\(name)")
         case .imageWrite: return L("图片写入失败。请检查磁盘空间与目录权限。")
+        case .invalidPointSize: return L("图片的屏幕显示尺寸必须成对提供，且为有限正数。")
+        case .invalidPinPosition: return L("贴图位置必须成对提供，且为有限坐标。")
         case .invalidName: return L("图片名称不能为空，也不能包含 / 或 :。")
         case .invalidTag(let url): return L("录制颜色标签无法识别：\(url.path)")
         }
@@ -156,6 +180,21 @@ final class LibraryStore: ObservableObject {
     func rememberImage(_ id: UUID) throws {
         guard !defaults.bool(forKey: "privacyMode") else { return }
         try withImageLock { try database.rememberImage(id) }
+    }
+
+    func setPinPosition(_ origin: CGPoint, for id: UUID) throws {
+        guard !defaults.bool(forKey: "privacyMode") else { return }
+        try withImageLock {
+            try reloadImages()
+            guard let index = images.firstIndex(where: { $0.id == id }) else { throw CollectionError.missingAsset }
+            var updated = images[index]
+            updated.pinX = Double(origin.x)
+            updated.pinY = Double(origin.y)
+            try updated.validatePinPosition()
+            guard updated != images[index] else { return }
+            try database.setPinPosition(origin, for: id)
+            images[index] = updated
+        }
     }
 
     func clearOperationHistory() throws {
@@ -588,16 +627,22 @@ final class LibraryStore: ObservableObject {
     }
 
     @discardableResult
-    func addImage(_ image: CGImage, source: String, filename: String? = nil, tag: AssetTag? = nil, collectionID: UUID? = nil) throws -> VaultImage {
+    func addImage(_ image: CGImage, source: String, filename: String? = nil, tag: AssetTag? = nil, collectionID: UUID? = nil,
+                  pointSize: CGSize? = nil, pinOrigin: CGPoint? = nil) throws -> VaultImage {
         try AutomationAccess.check()
         return try withImageLock {
             try reloadImages()
             try reloadStorage()
             try storageDirectoryAccess.requireAccess(to: screenshotDirectory)
+            let recordedOrigin = defaults.bool(forKey: "privacyMode") ? nil : pinOrigin
             let id = UUID()
             let item = VaultImage(id: id, filename: filename ?? Self.captureName(source), createdAt: Date(),
                                   width: image.width, height: image.height, source: source,
-                                  directory: storage.screenshotDirectory?.appendingPathComponent(id.uuidString, isDirectory: true), tag: tag)
+                                  directory: storage.screenshotDirectory?.appendingPathComponent(id.uuidString, isDirectory: true), tag: tag,
+                                  pointWidth: pointSize.map { Double($0.width) }, pointHeight: pointSize.map { Double($0.height) },
+                                  pinX: recordedOrigin.map { Double($0.x) }, pinY: recordedOrigin.map { Double($0.y) })
+            try item.validatePointSize()
+            try item.validatePinPosition()
             let directory = imageURL(item).deletingLastPathComponent()
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: false)
             do {

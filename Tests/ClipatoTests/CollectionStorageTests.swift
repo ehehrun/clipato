@@ -13,7 +13,7 @@ final class CollectionDatabaseTests: XCTestCase {
             try database.insert(item)
             try database.updateStoragePolicy(policy)
         }
-        try execute("DROP TABLE operationHistory; DROP TABLE collectionMembers; DROP TABLE collections; ALTER TABLE storagePolicy DROP COLUMN protectCollectedImages; PRAGMA user_version = 1", root: root)
+        try execute("ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight; ALTER TABLE images DROP COLUMN pointWidth; DROP TABLE operationHistory; DROP TABLE collectionMembers; DROP TABLE collections; ALTER TABLE storagePolicy DROP COLUMN protectCollectedImages; PRAGMA user_version = 1", root: root)
 
         let database = try LibraryDatabase(root: root)
         XCTAssertEqual(try database.images(), [item])
@@ -35,7 +35,7 @@ final class CollectionDatabaseTests: XCTestCase {
             try database.updateStoragePolicy(policy)
         }
         // 索引名冲突发生于新目录表、关联表创建之后，验证 DDL 与版本一起回滚。
-        try execute("DROP TABLE operationHistory; DROP TABLE collectionMembers; DROP TABLE collections; ALTER TABLE storagePolicy DROP COLUMN protectCollectedImages; CREATE INDEX collection_images ON images(filename); PRAGMA user_version = 1", root: root)
+        try execute("ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight; ALTER TABLE images DROP COLUMN pointWidth; DROP TABLE operationHistory; DROP TABLE collectionMembers; DROP TABLE collections; ALTER TABLE storagePolicy DROP COLUMN protectCollectedImages; CREATE INDEX collection_images ON images(filename); PRAGMA user_version = 1", root: root)
         XCTAssertThrowsError(try LibraryDatabase(root: root))
         XCTAssertEqual(try integer("PRAGMA user_version", root: root), 1)
         XCTAssertEqual(try integer("SELECT count(*) FROM sqlite_master WHERE name IN ('collections', 'collectionMembers')", root: root), 0)
@@ -46,7 +46,7 @@ final class CollectionDatabaseTests: XCTestCase {
         let restored = try LibraryDatabase(root: root)
         XCTAssertEqual(try restored.images(), [item])
         XCTAssertEqual(try restored.storagePolicy(), policy)
-        XCTAssertEqual(try integer("PRAGMA user_version", root: root), 6)
+        XCTAssertEqual(try integer("PRAGMA user_version", root: root), 8)
     }
 
     func testVersionTwoTreeIsPromotedInPreorderWithoutChangingNamesIDsMembersOrMedia() throws {
@@ -86,7 +86,7 @@ final class CollectionDatabaseTests: XCTestCase {
         XCTAssertEqual(try migrated.images(), [item])
         XCTAssertEqual(try Data(contentsOf: video), bytes)
         XCTAssertTrue(try migrated.storagePolicy().protectCollectedImages)
-        XCTAssertEqual(try integer("PRAGMA user_version", root: root), 6)
+        XCTAssertEqual(try integer("PRAGMA user_version", root: root), 8)
         XCTAssertEqual(try LibraryDatabase(root: root).collectionState().0, collections)
     }
 
@@ -160,6 +160,8 @@ final class CollectionDatabaseTests: XCTestCase {
             try database.clearOperationHistory()
         }
         try execute("""
+            ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight;
+            ALTER TABLE images DROP COLUMN pointWidth;
             ALTER TABLE collections DROP COLUMN color;
             CREATE TRIGGER images_remember_recent AFTER INSERT ON images
             BEGIN UPDATE operationHistory SET imageID = NEW.id WHERE id = 1; END;
@@ -175,7 +177,7 @@ final class CollectionDatabaseTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: video), bytes)
         XCTAssertEqual(try migrated.storagePolicy(), policy)
         XCTAssertNil(try migrated.recentImage())
-        XCTAssertEqual(try integer("PRAGMA user_version", root: root), 6)
+        XCTAssertEqual(try integer("PRAGMA user_version", root: root), 8)
         try migrated.setCollectionColor(expected[0].id, color: .blue)
         XCTAssertEqual(try LibraryDatabase(root: root).collectionState().0.first?.color, .blue)
     }
@@ -418,6 +420,8 @@ final class CollectionDatabaseTests: XCTestCase {
             DROP TRIGGER collections_single_level_insert;
             DROP TRIGGER collections_single_level_update;
             DROP TABLE operationHistory;
+            ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight;
+            ALTER TABLE images DROP COLUMN pointWidth;
             ALTER TABLE collections DROP COLUMN color;
             ALTER TABLE storagePolicy DROP COLUMN protectCollectedImages;
             PRAGMA user_version = 2

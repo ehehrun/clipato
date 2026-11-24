@@ -337,7 +337,7 @@ final class AppModel: ObservableObject {
                 guard let result = try await screenshots.captureRegion(initialFullScreen: !region) else { return }
                 screenCapturePermissionError = nil
                 let image = result.image
-                let item = try storeScreenshot(image, tag: result.tag)
+                let item = try storeScreenshot(image, tag: result.tag, pointSize: result.frame.size, pinOrigin: result.frame.origin)
                 switch result.action {
                 case .copy:
                     copyImage(image)
@@ -347,7 +347,10 @@ final class AppModel: ObservableObject {
                     let filename = try item?.filename ?? CaptureFileNaming.nextFilename(for: .screenshot, extension: "png", defaults: defaults)
                     export(image, filename: filename)
                 case .pin:
-                    screenshots.pin(image: image, frame: result.frame)
+                    screenshots.pin(image: image, frame: result.frame) { [weak self] origin in
+                        guard let item else { return }
+                        self?.rememberPinPosition(origin, for: item.id)
+                    }
                     notice = item == nil ? L("截图已贴到屏幕") : L("截图已保存，并贴到屏幕")
                 }
             } catch { reportCaptureError(error, message: error.localizedDescription) }
@@ -364,13 +367,13 @@ final class AppModel: ObservableObject {
         NotificationCenter.default.post(name: .clipatoShowScreenCapturePermissions, object: self)
     }
 
-    func storeScreenshot(_ image: CGImage, tag: AssetTag?) throws -> VaultImage? {
+    func storeScreenshot(_ image: CGImage, tag: AssetTag?, pointSize: CGSize? = nil, pinOrigin: CGPoint? = nil) throws -> VaultImage? {
         guard !privacyMode else { return nil }
         guard let library else {
             throw NSError(domain: "Clipato", code: 1, userInfo: [NSLocalizedDescriptionKey: L("保管箱不可用，无法保存截图。")])
         }
         let filename = try CaptureFileNaming.nextFilename(for: .screenshot, extension: "png", defaults: defaults)
-        return try library.addImage(image, source: "截图", filename: filename, tag: tag)
+        return try library.addImage(image, source: "截图", filename: filename, tag: tag, pointSize: pointSize, pinOrigin: pinOrigin)
     }
 
     func captureFixedRegion() {
@@ -715,10 +718,32 @@ final class AppModel: ObservableObject {
     func pin(_ item: VaultImage) {
         guard let library else { return }
         do {
+            try library.reloadImages()
+            guard let item = library.images.first(where: { $0.id == item.id }) else { throw CollectionError.missingAsset }
             let image = try library.loadImage(item)
             try library.rememberImage(item.id)
-            screenshots.pin(image: image)
+            let pointSize: CGSize?
+            if let width = item.pointWidth, let height = item.pointHeight {
+                pointSize = CGSize(width: width, height: height)
+            } else {
+                pointSize = nil
+            }
+            let origin: CGPoint?
+            if let x = item.pinX, let y = item.pinY {
+                origin = CGPoint(x: x, y: y)
+            } else {
+                origin = nil
+            }
+            screenshots.pin(image: image, pointSize: pointSize, origin: origin) { [weak self] origin in
+                self?.rememberPinPosition(origin, for: item.id)
+            }
         }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func rememberPinPosition(_ origin: CGPoint, for id: UUID) {
+        guard !privacyMode, !clearingLibraryData, let library else { return }
+        do { try library.setPinPosition(origin, for: id) }
         catch { errorMessage = error.localizedDescription }
     }
 

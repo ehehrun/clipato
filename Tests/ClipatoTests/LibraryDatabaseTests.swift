@@ -6,8 +6,12 @@ import XCTest
 final class LibraryDatabaseTests: XCTestCase {
     func testLegacyMigrationPreservesOrderFieldsAndOriginalBackupAcrossReopens() throws {
         let root = try temporaryDirectory()
-        let first = item(filename: "中文 ' \".png", date: Date(timeIntervalSince1970: 1_700_000_000),
+        var first = item(filename: "中文 ' \".png", date: Date(timeIntervalSince1970: 1_700_000_000),
                          directory: root.appendingPathComponent("外部 图片"), tag: .purple)
+        first.pointWidth = 160.25
+        first.pointHeight = 90.125
+        first.pinX = -1920.25
+        first.pinY = 0
         let second = item(filename: "older.png", date: first.createdAt, tag: nil)
         let legacy = root.appendingPathComponent("images.json")
         let bytes = try encode([second, first])
@@ -21,7 +25,7 @@ final class LibraryDatabaseTests: XCTestCase {
         let reopened = try LibraryDatabase(root: root)
         XCTAssertEqual(try reopened.images().map(\.id), [second.id, first.id])
         XCTAssertEqual(try reopened.images().first?.filename, "new name.png")
-        XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 6)
+        XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 8)
         XCTAssertEqual(try scalar("PRAGMA integrity_check = 1", root: root, text: true), "ok")
     }
 
@@ -69,7 +73,7 @@ final class LibraryDatabaseTests: XCTestCase {
         let restored = try LibraryDatabase(root: root).images()
         XCTAssertEqual(restored.map(\.id), [invalid.id, valid.id])
         XCTAssertEqual(restored.first?.directory, invalid.directory)
-        XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 6)
+        XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 8)
     }
 
     func testExternalWritesAdvanceDataVersionAndPersistWithoutLosingOtherRows() throws {
@@ -157,6 +161,8 @@ final class LibraryDatabaseTests: XCTestCase {
         XCTAssertEqual(sqlite3_open(root.appendingPathComponent("library.sqlite").path, &connection), SQLITE_OK)
         XCTAssertEqual(sqlite3_exec(connection, """
             DROP TABLE operationHistory;
+            ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight;
+            ALTER TABLE images DROP COLUMN pointWidth;
             ALTER TABLE collections DROP COLUMN color;
             PRAGMA user_version = 3
             """, nil, nil, nil), SQLITE_OK)
@@ -166,7 +172,7 @@ final class LibraryDatabaseTests: XCTestCase {
             let migrated = try LibraryDatabase(root: root)
             XCTAssertEqual(try migrated.recentImage(), second)
             XCTAssertEqual(try migrated.images(), [second, first])
-            XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 6)
+            XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 8)
             try migrated.clearOperationHistory()
         }
         let reopened = try LibraryDatabase(root: root)
@@ -211,6 +217,8 @@ final class LibraryDatabaseTests: XCTestCase {
             var connection: OpaquePointer?
             XCTAssertEqual(sqlite3_open(root.appendingPathComponent("library.sqlite").path, &connection), SQLITE_OK)
             XCTAssertEqual(sqlite3_exec(connection, """
+                ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight;
+                ALTER TABLE images DROP COLUMN pointWidth;
                 CREATE TRIGGER images_remember_recent AFTER INSERT ON images
                 BEGIN UPDATE operationHistory SET imageID = NEW.id WHERE id = 1; END;
                 PRAGMA user_version = 5
@@ -223,7 +231,7 @@ final class LibraryDatabaseTests: XCTestCase {
             try migrated.insert(single, remember: false)
             try migrated.insert(batch, remember: false)
 
-            XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 6)
+            XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 8)
             XCTAssertEqual(try scalar("SELECT count(*) FROM sqlite_master WHERE name = 'images_remember_recent'", root: root), 0)
             XCTAssertEqual(try migrated.recentImage(), cleared ? nil : original)
             XCTAssertEqual(try migrated.images(), Array(batch.reversed()) + [single, original])
@@ -271,6 +279,198 @@ final class LibraryDatabaseTests: XCTestCase {
 
         XCTAssertEqual(try database.recentImage(), original)
         XCTAssertEqual(try database.images(), [original])
+    }
+
+    func testVersionSixMigrationPreservesImagesHistoryAndUnknownPointDimensions() throws {
+        for cleared in [false, true] {
+            let root = try temporaryDirectory()
+            let original = item(filename: "legacy.png", tag: .purple)
+            do {
+                let database = try LibraryDatabase(root: root)
+                try database.insert(original)
+                if cleared { try database.clearOperationHistory() }
+            }
+            var connection: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(root.appendingPathComponent("library.sqlite").path, &connection), SQLITE_OK)
+            XCTAssertEqual(sqlite3_exec(connection, """
+                ALTER TABLE images DROP COLUMN pinY; ALTER TABLE images DROP COLUMN pinX; ALTER TABLE images DROP COLUMN pointHeight;
+                ALTER TABLE images DROP COLUMN pointWidth;
+                PRAGMA user_version = 6
+                """, nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(sqlite3_close(connection), SQLITE_OK)
+
+            let migrated = try LibraryDatabase(root: root)
+            XCTAssertEqual(try migrated.images(), [original])
+            XCTAssertEqual(try migrated.recentImage(), cleared ? nil : original)
+            XCTAssertNil(try migrated.image(original.id)?.pointWidth)
+            XCTAssertNil(try migrated.image(original.id)?.pointHeight)
+            XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 8)
+            let reopened = try LibraryDatabase(root: root)
+            XCTAssertEqual(try reopened.images(), [original])
+            XCTAssertEqual(try reopened.recentImage(), cleared ? nil : original)
+            XCTAssertEqual(try scalar("PRAGMA integrity_check = 1", root: root, text: true), "ok")
+        }
+    }
+
+    func testPointDimensionsPersistExactlyAcrossQueriesAndReopen() throws {
+        let root = try temporaryDirectory()
+        var original = item(filename: "retina.png", tag: .orange)
+        original.pointWidth = 160.25
+        original.pointHeight = 90.125
+        do {
+            let database = try LibraryDatabase(root: root)
+            try database.insert(original)
+            XCTAssertEqual(try database.image(original.id), original)
+            XCTAssertEqual(try database.recentImage(), original)
+        }
+        let reopened = try LibraryDatabase(root: root)
+        XCTAssertEqual(try reopened.images(), [original])
+        XCTAssertEqual(try reopened.image(original.id), original)
+        XCTAssertEqual(try reopened.recentImage(), original)
+        XCTAssertEqual(try reopened.image(original.id)?.width, 320)
+        XCTAssertEqual(try reopened.image(original.id)?.height, 180)
+    }
+
+    func testVersionSevenMigrationPreservesImagesHistoryCollectionsAndPolicy() throws {
+        for cleared in [false, true] {
+            let root = try temporaryDirectory()
+            var original = item(filename: "retina.png", directory: root.appendingPathComponent("外部 图片"), tag: .purple)
+            original.pointWidth = 160.25
+            original.pointHeight = 90.125
+            let second = item(filename: "ordinary.png")
+            let file = root.appendingPathComponent("original.png")
+            let bytes = Data("untouched original image bytes".utf8)
+            try bytes.write(to: file)
+            let policy = LibraryStoragePolicy(maximumBytes: 8192, automaticallyRemoveOldestImages: true,
+                                              protectTaggedImages: false, keepRecentDays: 7)
+            let collection: AssetCollection
+            do {
+                let database = try LibraryDatabase(root: root)
+                try database.insert(original)
+                try database.insert(second)
+                try database.rememberImage(original.id)
+                if cleared { try database.clearOperationHistory() }
+                collection = try database.createCollection(name: "工作", parentID: nil)
+                try database.addToCollection(collection.id, assets: [.image(original.id), .image(second.id)])
+                try database.updateStoragePolicy(policy)
+            }
+            var connection: OpaquePointer?
+            XCTAssertEqual(sqlite3_open(root.appendingPathComponent("library.sqlite").path, &connection), SQLITE_OK)
+            XCTAssertEqual(sqlite3_exec(connection, """
+                ALTER TABLE images DROP COLUMN pinY;
+                ALTER TABLE images DROP COLUMN pinX;
+                PRAGMA user_version = 7
+                """, nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(sqlite3_close(connection), SQLITE_OK)
+
+            let migrated = try LibraryDatabase(root: root)
+            XCTAssertEqual(try migrated.images(), [second, original])
+            XCTAssertEqual(try migrated.recentImage(), cleared ? nil : original)
+            XCTAssertNil(try migrated.image(original.id)?.pinX)
+            XCTAssertNil(try migrated.image(original.id)?.pinY)
+            XCTAssertEqual(try migrated.storagePolicy(), policy)
+            let state = try migrated.collectionState()
+            XCTAssertEqual(state.0, [collection])
+            XCTAssertEqual(state.1, [collection.id: [.image(original.id), .image(second.id)]])
+            XCTAssertEqual(try Data(contentsOf: file), bytes)
+            XCTAssertEqual(try scalar("PRAGMA user_version", root: root), 8)
+
+            try migrated.setPinPosition(CGPoint(x: -1920.25, y: 0), for: original.id)
+            original.pinX = -1920.25
+            original.pinY = 0
+            let reopened = try LibraryDatabase(root: root)
+            XCTAssertEqual(try reopened.images(), [second, original])
+            XCTAssertEqual(try reopened.recentImage(), cleared ? nil : original)
+            XCTAssertEqual(try reopened.storagePolicy(), policy)
+            XCTAssertEqual(try reopened.collectionState().1, state.1)
+            XCTAssertEqual(try scalar("PRAGMA integrity_check = 1", root: root, text: true), "ok")
+        }
+    }
+
+    func testInvalidPinPositionsRollBackInsertsAndNeverRecreateDeletedImages() throws {
+        let root = try temporaryDirectory()
+        let database = try LibraryDatabase(root: root)
+        let original = item(filename: "original.png")
+        try database.insert(original)
+        let invalidPositions: [(Double?, Double?)] = [(nil, 0), (0, nil), (.infinity, 0), (0, .nan)]
+        for (x, y) in invalidPositions {
+            var invalid = item(filename: "invalid.png")
+            invalid.pinX = x
+            invalid.pinY = y
+            XCTAssertThrowsError(try database.insert([item(filename: "pending.png"), invalid])) { error in
+                XCTAssertEqual(error.localizedDescription, LibraryError.invalidPinPosition.localizedDescription)
+            }
+            XCTAssertEqual(try database.images(), [original])
+            XCTAssertEqual(try database.recentImage(), original)
+        }
+        XCTAssertThrowsError(try database.setPinPosition(CGPoint(x: CGFloat.infinity, y: 0), for: original.id)) { error in
+            XCTAssertEqual(error.localizedDescription, LibraryError.invalidPinPosition.localizedDescription)
+        }
+        XCTAssertEqual(try database.image(original.id), original)
+        try database.delete(original.id)
+        XCTAssertThrowsError(try database.setPinPosition(CGPoint(x: 0, y: 0), for: original.id)) { error in
+            guard case CollectionError.missingAsset = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertTrue(try database.images().isEmpty)
+        XCTAssertNil(try database.recentImage())
+    }
+
+    func testRawPinCoordinatesRequireANumericPairAndRejectNonfiniteReads() throws {
+        let root = try temporaryDirectory()
+        let database = try LibraryDatabase(root: root)
+        let original = item(filename: "original.png")
+        try database.insert(original)
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(root.appendingPathComponent("library.sqlite").path, &connection), SQLITE_OK)
+        defer { sqlite3_close(connection) }
+        for update in ["pinX = 0", "pinY = -10", "pinX = 'invalid', pinY = 0"] {
+            XCTAssertNotEqual(sqlite3_exec(connection, "UPDATE images SET \(update)", nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(try database.images(), [original])
+        }
+        XCTAssertEqual(sqlite3_exec(connection, "UPDATE images SET pinX = 1e999, pinY = 0", nil, nil, nil), SQLITE_OK)
+        XCTAssertThrowsError(try database.images()) { error in
+            XCTAssertEqual(error.localizedDescription, LibraryError.invalidPinPosition.localizedDescription)
+        }
+        XCTAssertEqual(try scalar("SELECT count(*) FROM images", root: root), 1)
+    }
+
+    func testInvalidPointDimensionsRollBackBatchAndPreserveHistory() throws {
+        let root = try temporaryDirectory()
+        let database = try LibraryDatabase(root: root)
+        let original = item(filename: "original.png")
+        try database.insert(original)
+        let invalidDimensions: [(Double?, Double?)] = [
+            (nil, 90), (160, nil), (0, 90), (160, -1), (.infinity, 90), (160, .nan),
+        ]
+        for (width, height) in invalidDimensions {
+            var invalid = item(filename: "invalid.png")
+            invalid.pointWidth = width
+            invalid.pointHeight = height
+            XCTAssertThrowsError(try database.insert([item(filename: "pending.png"), invalid])) { error in
+                XCTAssertEqual(error.localizedDescription, LibraryError.invalidPointSize.localizedDescription)
+            }
+            XCTAssertEqual(try database.images(), [original])
+            XCTAssertEqual(try database.recentImage(), original)
+        }
+    }
+
+    func testRawInvalidPointDimensionsAreRejectedWithoutChangingRows() throws {
+        let root = try temporaryDirectory()
+        let database = try LibraryDatabase(root: root)
+        let original = item(filename: "original.png")
+        try database.insert(original)
+        var connection: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(root.appendingPathComponent("library.sqlite").path, &connection), SQLITE_OK)
+        defer { sqlite3_close(connection) }
+        for update in ["pointWidth = 160", "pointHeight = 90", "pointWidth = 0, pointHeight = 90", "pointWidth = 160, pointHeight = -1"] {
+            XCTAssertNotEqual(sqlite3_exec(connection, "UPDATE images SET \(update)", nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(try database.images(), [original])
+        }
+        XCTAssertEqual(sqlite3_exec(connection, "UPDATE images SET pointWidth = 1e999, pointHeight = 90", nil, nil, nil), SQLITE_OK)
+        XCTAssertThrowsError(try database.images()) { error in
+            XCTAssertEqual(error.localizedDescription, LibraryError.invalidPointSize.localizedDescription)
+        }
+        XCTAssertEqual(try scalar("SELECT count(*) FROM images", root: root), 1)
     }
 
     private func item(filename: String, date: Date = Date(), directory: URL? = nil, tag: AssetTag? = nil) -> VaultImage {

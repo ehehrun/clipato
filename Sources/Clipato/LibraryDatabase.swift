@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import CSQLite
 
 struct LibraryDatabaseError: LocalizedError {
@@ -9,7 +10,7 @@ struct LibraryDatabaseError: LocalizedError {
 final class LibraryDatabase {
     private let connection: OpaquePointer
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    private static let insertSQL = "INSERT INTO images (id, filename, createdAt, width, height, source, directory, tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    private static let insertSQL = "INSERT INTO images (id, filename, createdAt, width, height, source, directory, tag, pointWidth, pointHeight, pinX, pinY) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
     init(root: URL) throws {
         var opened: OpaquePointer?
@@ -28,7 +29,7 @@ final class LibraryDatabase {
         try execute("PRAGMA journal_mode = WAL")
         try transaction {
             let version = try integer("PRAGMA user_version")
-            guard (0...6).contains(version) else {
+            guard (0...8).contains(version) else {
                 throw LibraryDatabaseError(message: L("此索引版本较新，请使用支持版本 \(version) 的 Clipato。"))
             }
             if version == 0 {
@@ -41,7 +42,17 @@ final class LibraryDatabase {
                         height INTEGER NOT NULL CHECK (height > 0),
                         source TEXT NOT NULL,
                         directory TEXT,
-                        tag TEXT CHECK (tag IN ('red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'))
+                        tag TEXT CHECK (tag IN ('red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray')),
+                        pointWidth REAL CHECK (pointWidth IS NULL OR pointWidth > 0),
+                        pointHeight REAL CHECK (
+                            (pointWidth IS NULL AND pointHeight IS NULL) OR
+                            (pointWidth IS NOT NULL AND pointHeight IS NOT NULL AND pointWidth > 0 AND pointHeight > 0)
+                        ),
+                        pinX REAL,
+                        pinY REAL CHECK (
+                            (pinX IS NULL AND pinY IS NULL) OR
+                            (pinX IS NOT NULL AND pinY IS NOT NULL AND typeof(pinX) IN ('integer', 'real') AND typeof(pinY) IN ('integer', 'real'))
+                        )
                     )
                     """)
                 let legacy = root.appendingPathComponent("images.json")
@@ -137,6 +148,30 @@ final class LibraryDatabase {
             if version < 5 { try execute("PRAGMA user_version = 5") }
             if version < 6 {
                 try execute("DROP TRIGGER images_remember_recent; PRAGMA user_version = 6")
+            }
+            if version < 7 {
+                if version > 0 {
+                    try execute("""
+                        ALTER TABLE images ADD COLUMN pointWidth REAL CHECK (pointWidth IS NULL OR pointWidth > 0);
+                        ALTER TABLE images ADD COLUMN pointHeight REAL CHECK (
+                            (pointWidth IS NULL AND pointHeight IS NULL) OR
+                            (pointWidth IS NOT NULL AND pointHeight IS NOT NULL AND pointWidth > 0 AND pointHeight > 0)
+                        )
+                        """)
+                }
+                try execute("PRAGMA user_version = 7")
+            }
+            if version < 8 {
+                if version > 0 {
+                    try execute("""
+                        ALTER TABLE images ADD COLUMN pinX REAL;
+                        ALTER TABLE images ADD COLUMN pinY REAL CHECK (
+                            (pinX IS NULL AND pinY IS NULL) OR
+                            (pinX IS NOT NULL AND pinY IS NOT NULL AND typeof(pinX) IN ('integer', 'real') AND typeof(pinY) IN ('integer', 'real'))
+                        )
+                        """)
+                }
+                try execute("PRAGMA user_version = 8")
             }
         }
     }
@@ -365,7 +400,7 @@ final class LibraryDatabase {
     }
 
     func images() throws -> [VaultImage] {
-        try statement("SELECT id, filename, createdAt, width, height, source, directory, tag FROM images ORDER BY rowid DESC") { statement in
+        try statement("SELECT id, filename, createdAt, width, height, source, directory, tag, pointWidth, pointHeight, pinX, pinY FROM images ORDER BY rowid DESC") { statement in
             var images: [VaultImage] = []
             while try step(statement) == SQLITE_ROW {
                 images.append(try readImage(statement))
@@ -375,7 +410,7 @@ final class LibraryDatabase {
     }
 
     func image(_ id: UUID) throws -> VaultImage? {
-        try statement("SELECT id, filename, createdAt, width, height, source, directory, tag FROM images WHERE id = ?") { statement in
+        try statement("SELECT id, filename, createdAt, width, height, source, directory, tag, pointWidth, pointHeight, pinX, pinY FROM images WHERE id = ?") { statement in
             try bind(id.uuidString, to: statement, at: 1)
             guard try step(statement) == SQLITE_ROW else { return nil }
             return try readImage(statement)
@@ -384,7 +419,7 @@ final class LibraryDatabase {
 
     func recentImage() throws -> VaultImage? {
         try statement("""
-            SELECT i.id, i.filename, i.createdAt, i.width, i.height, i.source, i.directory, i.tag
+            SELECT i.id, i.filename, i.createdAt, i.width, i.height, i.source, i.directory, i.tag, i.pointWidth, i.pointHeight, i.pinX, i.pinY
             FROM operationHistory h JOIN images i ON i.id = h.imageID WHERE h.id = 1
             """) { statement in
             guard try step(statement) == SQLITE_ROW else { return nil }
@@ -399,6 +434,17 @@ final class LibraryDatabase {
             guard sqlite3_changes(connection) == 1 else {
                 throw LibraryDatabaseError(message: L("操作记忆记录缺失。"))
             }
+        }
+    }
+
+    func setPinPosition(_ origin: CGPoint, for id: UUID) throws {
+        guard origin.x.isFinite, origin.y.isFinite else { throw LibraryError.invalidPinPosition }
+        try statement("UPDATE images SET pinX = ?, pinY = ? WHERE id = ?") { statement in
+            try bind(Double(origin.x), to: statement, at: 1)
+            try bind(Double(origin.y), to: statement, at: 2)
+            try bind(id.uuidString, to: statement, at: 3)
+            try step(statement)
+            guard sqlite3_changes(connection) == 1 else { throw CollectionError.missingAsset }
         }
     }
 
@@ -429,10 +475,18 @@ final class LibraryDatabase {
             }
             tag = value
         }
-        return VaultImage(id: id, filename: try text(statement, at: 1),
+        let pointWidth: Double? = sqlite3_column_type(statement, 8) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 8)
+        let pointHeight: Double? = sqlite3_column_type(statement, 9) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 9)
+        let pinX: Double? = sqlite3_column_type(statement, 10) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 10)
+        let pinY: Double? = sqlite3_column_type(statement, 11) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 11)
+        let image = VaultImage(id: id, filename: try text(statement, at: 1),
                                  createdAt: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 2)),
                                  width: Int(sqlite3_column_int64(statement, 3)), height: Int(sqlite3_column_int64(statement, 4)),
-                                 source: try text(statement, at: 5), directory: directory, tag: tag)
+                                 source: try text(statement, at: 5), directory: directory, tag: tag,
+                                 pointWidth: pointWidth, pointHeight: pointHeight, pinX: pinX, pinY: pinY)
+        try image.validatePointSize()
+        try image.validatePinPosition()
+        return image
     }
 
     func storagePolicy() throws -> LibraryStoragePolicy {
@@ -560,6 +614,8 @@ final class LibraryDatabase {
     }
 
     private func insert(_ image: VaultImage, using statement: OpaquePointer) throws {
+        try image.validatePointSize()
+        try image.validatePinPosition()
         if let directory = image.directory, !directory.isFileURL {
             throw LibraryDatabaseError(message: L("图片保存位置无效，索引未被修改。"))
         }
@@ -571,6 +627,10 @@ final class LibraryDatabase {
         try bind(image.source, to: statement, at: 6)
         try bind(image.directory?.absoluteString, to: statement, at: 7)
         try bind(image.tag?.rawValue, to: statement, at: 8)
+        try bind(image.pointWidth, to: statement, at: 9)
+        try bind(image.pointHeight, to: statement, at: 10)
+        try bind(image.pinX, to: statement, at: 11)
+        try bind(image.pinY, to: statement, at: 12)
         try step(statement)
     }
 
@@ -621,6 +681,11 @@ final class LibraryDatabase {
         if let value {
             try check(sqlite3_bind_text(statement, index, value, Int32(value.utf8.count), Self.transient))
         } else { try check(sqlite3_bind_null(statement, index)) }
+    }
+
+    private func bind(_ value: Double?, to statement: OpaquePointer, at index: Int32) throws {
+        if let value { try check(sqlite3_bind_double(statement, index, value)) }
+        else { try check(sqlite3_bind_null(statement, index)) }
     }
 
     private func text(_ statement: OpaquePointer, at column: Int32) throws -> String {

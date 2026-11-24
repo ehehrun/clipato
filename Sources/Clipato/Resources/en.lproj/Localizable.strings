@@ -1299,3 +1299,6 @@
 "GitHub 标签数据无效。" = "GitHub tag data is invalid.";
 "GitHub 仓库中没有可比较的正式版本标签。" = "The GitHub repository has no comparable stable version tags.";
 "当前应用的版本号无效。" = "The current application version is invalid.";
+
+"图片的屏幕显示尺寸必须成对提供，且为有限正数。" = "An image’s screen size must include both width and height as finite positive numbers.";
+"贴图位置必须成对提供，且为有限坐标。" = "A pinned image position must include both coordinates as finite numbers.";
