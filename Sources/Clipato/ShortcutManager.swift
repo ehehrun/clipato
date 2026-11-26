@@ -3,7 +3,7 @@ import Carbon
 import Combine
 
 enum ShortcutAction: String, Codable, CaseIterable, Identifiable {
-    case captureRegion, pinLatest, toggleRecording, captureDisplay, fixedCapture, togglePinnedMousePassthrough
+    case captureRegion, pinLatest, toggleRecording, captureDisplay, fixedCapture, togglePinnedMousePassthrough, toggleGIFRecording
 
     var id: String { rawValue }
     var title: String {
@@ -14,6 +14,7 @@ enum ShortcutAction: String, Codable, CaseIterable, Identifiable {
         case .captureDisplay: return L("截取当前屏幕")
         case .fixedCapture: return L("固定区域连续截图")
         case .togglePinnedMousePassthrough: return L("贴图鼠标穿透")
+        case .toggleGIFRecording: return L("开始 / 停止 GIF 录制")
         }
     }
 }
@@ -111,6 +112,7 @@ final class ShortcutManager: ObservableObject {
 
     private static let bindingsKey = "FrameVault.shortcuts"
     private static let fixedCaptureAddedKey = "FrameVault.fixedCaptureShortcutAdded"
+    private static let gifRecordingMigratedKey = "FrameVault.gifRecordingShortcutMigrated"
     private static let enabledKey = "FrameVault.shortcutsEnabled"
     private static let signature: OSType = 0x46565348
     private let defaults: UserDefaults
@@ -136,10 +138,18 @@ final class ShortcutManager: ObservableObject {
                         defaults.set(try JSONEncoder().encode(bindings), forKey: Self.bindingsKey)
                     }
                 }
+                if !defaults.bool(forKey: Self.gifRecordingMigratedKey), bindings.removeValue(forKey: .toggleRecording) != nil {
+                    let shortcut = try GlobalShortcut(keyCode: UInt32(kVK_F3), modifiers: 0)
+                    if bindings[.toggleGIFRecording] == nil, !bindings.values.contains(shortcut) {
+                        bindings[.toggleGIFRecording] = shortcut
+                    }
+                    defaults.set(try JSONEncoder().encode(bindings), forKey: Self.bindingsKey)
+                }
             } else {
                 bindings = try Self.defaultBindings()
             }
             defaults.set(true, forKey: Self.fixedCaptureAddedKey)
+            defaults.set(true, forKey: Self.gifRecordingMigratedKey)
         } catch {
             bindings = [:]
             errors = Dictionary(uniqueKeysWithValues: ShortcutAction.allCases.map {
@@ -276,7 +286,7 @@ final class ShortcutManager: ObservableObject {
     private static func defaultBindings() throws -> [ShortcutAction: GlobalShortcut] {
         [.captureRegion: try GlobalShortcut(keyCode: UInt32(kVK_F1), modifiers: 0),
          .pinLatest: try GlobalShortcut(keyCode: UInt32(kVK_F2), modifiers: 0),
-         .toggleRecording: try GlobalShortcut(keyCode: UInt32(kVK_F3), modifiers: 0),
+         .toggleGIFRecording: try GlobalShortcut(keyCode: UInt32(kVK_F3), modifiers: 0),
          .fixedCapture: try GlobalShortcut(keyCode: UInt32(kVK_F4), modifiers: 0),
          .togglePinnedMousePassthrough: try GlobalShortcut(keyCode: UInt32(kVK_F5), modifiers: 0)]
     }

@@ -1302,3 +1302,33 @@
 
 "图片的屏幕显示尺寸必须成对提供，且为有限正数。" = "An image’s screen size must include both width and height as finite positive numbers.";
 "贴图位置必须成对提供，且为有限坐标。" = "A pinned image position must include both coordinates as finite numbers.";
+
+"GIF 已保存" = "GIF Saved";
+"GIF 已保存到保管箱，并复制到剪贴板" = "GIF saved to the Vault and copied to the clipboard";
+"GIF 已保存，但无法写入剪贴板。" = "The GIF was saved, but could not be copied to the clipboard.";
+"GIF 帧率" = "GIF Frame Rate";
+"GIF 帧率须为 10、15、24 或 30，画面尺寸须在 1 到 1920 像素之间。" = "GIF frame rate must be 10, 15, 24, or 30 fps, and image dimensions must be between 1 and 1920 pixels.";
+"GIF 录制" = "GIF Recording";
+"GIF 录制中" = "Recording GIF";
+"GIF 录制已经结束。" = "GIF recording has already finished.";
+"GIF 无声音，完成后自动保存到保管箱并复制到剪贴板。" = "GIF recordings have no audio. When finished, they are saved to the Vault and copied to the clipboard automatically.";
+"GIF 画质" = "GIF Quality";
+"GIF 结束时间早于最后一帧，无法保存完整录制。" = "The GIF end time precedes its last frame, so the complete recording cannot be saved.";
+"停止并生成 GIF" = "Stop and Create GIF";
+"停止录制并保存 GIF、复制到剪贴板" = "Stop recording, save the GIF, and copy it to the clipboard";
+"均衡" = "Balanced";
+"完成 GIF 录制" = "Finish GIF Recording";
+"帧率越高，动作越流畅，文件也越大。" = "Higher frame rates produce smoother motion and larger files.";
+"开始 / 停止 GIF 录制" = "Start / Stop GIF Recording";
+"开始录制 GIF" = "Start Recording GIF";
+"录制 GIF" = "Record GIF";
+"无法编码 GIF 画面。" = "Unable to encode a GIF frame.";
+"更小文件" = "Smaller File";
+"更高清晰度" = "More Detail";
+"正在保存 GIF…" = "Saving GIF…";
+"正在录制 GIF" = "Recording GIF";
+"画质影响输出尺寸；默认设置兼顾清晰度与体积。" = "Quality controls output dimensions. The default balances clarity and file size.";
+"系统 GIF 编码器返回了无效的画面。" = "The system GIF encoder returned an invalid frame.";
+"GIF 已复制到剪贴板，未保存到保管箱" = "GIF copied to the clipboard without saving to the Vault";
+"GIF 无法写入剪贴板。" = "Could not copy the GIF to the clipboard.";
+"GIF 无声音，完成后复制到剪贴板；隐私模式下不自动保存到保管箱。" = "GIF recordings have no audio and are copied to the clipboard when finished. Privacy Mode prevents automatic saving to the Vault.";

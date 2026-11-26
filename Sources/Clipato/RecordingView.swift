@@ -75,9 +75,18 @@ struct RecordingView: View {
                     .scrollIndicators(.hidden)
             }
             .frame(height: 28 * max(1, fontScale)).padding(.horizontal, 24).padding(.vertical, 10)
-            Label(L("录屏不支持录音，主要用于后续按帧截取图片。"), systemImage: "mic.slash")
-                .consoleFont(11).foregroundStyle(Palette.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 12) {
+                Label(L("录屏不支持录音，主要用于后续按帧截取图片。"), systemImage: "mic.slash")
+                    .consoleFont(11).foregroundStyle(Palette.muted)
+                Spacer(minLength: 8)
+                Button { model.toggleGIFRecording() } label: {
+                    Label(L("录制 GIF"), systemImage: "livephoto")
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .fixedSize()
+                .disabled(isRecording || model.recordingBusy || model.capturing || model.fixedCaptureRegion != nil || model.clearingLibraryData)
+                .help(L("GIF 无声音，完成后复制到剪贴板；隐私模式下不自动保存到保管箱。"))
+            }
                 .padding(.horizontal, 24).padding(.bottom, 10)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -465,7 +474,7 @@ private struct RecordingStatusView: View {
             Image(systemName: recorder.isPaused ? "pause.circle.fill" : "record.circle.fill")
                 .foregroundStyle(recorder.isPaused ? Color.orange : Color.red)
             VStack(alignment: .leading, spacing: 4) {
-                Text(recorder.isPaused ? L("已暂停") : recorder.mode == .video ? L("正在录制视频") : L("正在记录关键帧"))
+                Text(recorder.isPaused ? L("已暂停") : recorder.mode == .gif ? L("正在录制 GIF") : recorder.mode == .video ? L("正在录制视频") : L("正在记录关键帧"))
                     .consoleFont(12, weight: .medium)
                 if let region {
                     Text("\(Double(region.rect.width).formatted(.number.precision(.fractionLength(0...2)))) × \(Double(region.rect.height).formatted(.number.precision(.fractionLength(0...2)))) pt")
@@ -530,6 +539,8 @@ struct GuideView: View {
                     }
                     guideSection(L("录屏与导出")) {
                         Text(L("录屏不支持录音，主要用于后续按帧截取图片。"))
+                        shortcut(L("开始 / 停止 GIF 录制"), action: .toggleGIFRecording,
+                                 detail: L("GIF 无声音，完成后复制到剪贴板；隐私模式下不自动保存到保管箱。"))
                         shortcut(L("开始 / 停止录屏"), action: .toggleRecording, detail: L("按所选方式直接录为 MP4，或保存关键帧幻灯片。框选并调整范围后点击开始，Esc 取消选区。绿框标记录制区域，浮动条可暂停、继续或停止；也可再次按快捷键停止。暂停不计时、不保存画面。"))
                         Text(L("在关键帧档案中点击「导出」，选择 MP4、GIF 或「导出到保管箱」。入箱时按时间顺序保存原始 PNG 并继承颜色标签，可继续多选拼图；原录制保留。MP4 和 GIF 保留实际停留时间，最长边分别为 1920 px、1280 px，只缩小较大画面；导出时可查看进度或取消。"))
                         Text(L("录屏排除 Clipato 窗口和绿色边框。关键帧用于变化较少的内容，采样间隔内的快速动画可能略过。"))

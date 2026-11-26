@@ -5,6 +5,30 @@ import XCTest
 
 @MainActor
 final class StatusMenuTests: XCTestCase {
+    func testGIFEntryIsIndependentAndRespectsRecordingAndCaptureBusyStateWithoutOpeningWindows() async throws {
+        let windowCount = NSApplication.shared.windows.count
+        let model = try await makeModel()
+        let delegate = ClipatoDelegate(model: model)
+        let menu = delegate.installStatusMenu()
+        let item = try XCTUnwrap(menu.items.first { $0.action == NSSelectorFromString("toggleGIFRecording") })
+        XCTAssertEqual(item.title, L("录制 GIF") + "    F3")
+        XCTAssertTrue(item.isEnabled)
+        XCTAssertEqual(model.shortcuts.bindings[.toggleGIFRecording]?.displayName, "F3")
+        XCTAssertNil(model.shortcuts.bindings[.toggleRecording])
+
+        model.recordingBusy = true
+        delegate.menuWillOpen(menu)
+        XCTAssertFalse(item.isEnabled)
+        model.recordingBusy = false
+        model.capturing = true
+        delegate.menuWillOpen(menu)
+        XCTAssertFalse(item.isEnabled)
+        model.capturing = false
+        delegate.menuWillOpen(menu)
+        XCTAssertTrue(item.isEnabled)
+        XCTAssertEqual(NSApplication.shared.windows.count, windowCount)
+    }
+
     func testStatusMenuStartsWithCaptureAndEndsWithConsoleBesideQuit() async throws {
         let application = NSApplication.shared
         let windowCount = application.windows.count

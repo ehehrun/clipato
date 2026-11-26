@@ -4,16 +4,22 @@ import XCTest
 
 @MainActor
 final class SelectionCursorTests: XCTestCase {
-    func testTrackingFollowsTheKeyPanelWithoutRequiringAppActivation() throws {
+    func testHoverTrackingSurvivesKeyLossWhileCursorUpdatesRemainKeyWindowScoped() throws {
         try withSelection { view, window in
             view.updateTrackingAreas()
-            let area = try XCTUnwrap(view.trackingAreas.first { ($0.owner as AnyObject?) === view })
-            XCTAssertTrue(area.options.contains(.activeInKeyWindow))
-            XCTAssertTrue(area.options.contains(.cursorUpdate))
-            XCTAssertTrue(area.options.contains(.mouseMoved))
-            XCTAssertTrue(area.options.contains(.mouseEnteredAndExited))
-            XCTAssertFalse(area.options.contains(.activeInActiveApp))
-            XCTAssertFalse(area.options.contains(.activeAlways), "AppKit does not support cursorUpdate with activeAlways")
+            let areas = view.trackingAreas.filter { ($0.owner as AnyObject?) === view }
+            XCTAssertEqual(areas.count, 2)
+            let cursor = try XCTUnwrap(areas.first { $0.options.contains(.cursorUpdate) })
+            XCTAssertTrue(cursor.options.contains(.activeInKeyWindow))
+            XCTAssertFalse(cursor.options.contains(.activeAlways), "AppKit does not support cursorUpdate with activeAlways")
+            XCTAssertFalse(cursor.options.contains(.mouseMoved))
+            XCTAssertFalse(cursor.options.contains(.mouseEnteredAndExited))
+            let hover = try XCTUnwrap(areas.first { $0.options.contains(.activeAlways) })
+            XCTAssertTrue(hover.options.contains(.mouseMoved))
+            XCTAssertTrue(hover.options.contains(.mouseEnteredAndExited))
+            XCTAssertFalse(hover.options.contains(.cursorUpdate))
+            XCTAssertFalse(hover.options.contains(.activeInKeyWindow))
+            XCTAssertTrue(areas.allSatisfy { !$0.options.contains(.activeInActiveApp) })
             XCTAssertTrue(window.styleMask.contains(.nonactivatingPanel))
             XCTAssertTrue(window.canBecomeKey)
         }

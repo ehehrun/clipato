@@ -252,7 +252,7 @@ enum MCPAppTools {
     private static func record(_ input: MCPInput) async throws -> [String: Any] {
         let output = try input.path("output")
         let duration = try input.double("duration", default: .nan, range: 0.01...3600)
-        guard let mode = RecordingMode(rawValue: try input.string("mode", default: "keyframes")) else { throw MCPError.invalidArguments("mode must be keyframes or video.") }
+        guard let mode = RecordingMode(rawValue: try input.string("mode", default: "keyframes")), mode != .gif else { throw MCPError.invalidArguments("mode must be keyframes or video.") }
         let fps = input.values["fps"] == nil ? nil : try input.int("fps", default: mode.defaultFrameRate, range: 1...60)
         let threshold = input.values["threshold"] == nil ? nil : try input.double("threshold", default: 0.025, range: 0...1)
         let maximum = try input.int("maxDimension", default: 1920, range: 1...16_384)

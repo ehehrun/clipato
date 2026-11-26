@@ -6,6 +6,7 @@ final class SelectionView: NSView {
     enum Mode {
         case screenshot(allowsDestinationActions: Bool)
         case recording
+        case gifRecording
         case fixedCapture
     }
 
@@ -23,6 +24,7 @@ final class SelectionView: NSView {
     var onRenderError: ((Error) -> Void)?
     var onRecordingModeChange: ((RecordingMode) -> Void)?
     private(set) var recordingMode: RecordingMode
+    private(set) var gifSettings: GIFRecordingSettings
     private(set) var assetTag: AssetTag?
     private(set) var selection = CGRect.zero
     private(set) var hoveredWindow: SelectionWindowTarget?
@@ -63,6 +65,9 @@ final class SelectionView: NSView {
     private let mosaicBrushPicker = SelectionPopUpButton(frame: .zero, pullsDown: false)
     private let mosaicSizePicker = SelectionPopUpButton(frame: .zero, pullsDown: false)
     private let recordingModePicker = SelectionSegmentedControl()
+    private let gifFrameRatePicker = SelectionPopUpButton(frame: .zero, pullsDown: false)
+    private let gifQualityPicker = SelectionPopUpButton(frame: .zero, pullsDown: false)
+    static let videoRecordingModes: [RecordingMode] = [.keyframes, .video]
     private let tagPicker = NativeAssetTagPicker()
     private let allowsTagSelection: Bool
     private var mosaicShape = MosaicShape.rectangle
@@ -102,7 +107,8 @@ final class SelectionView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     init(image: CGImage, frame: CGRect, mode: Mode = .screenshot(allowsDestinationActions: true), initialFullScreen: Bool = false,
-         recordingMode: RecordingMode = .keyframes, tag: AssetTag? = nil, allowsTagSelection: Bool = true,
+         recordingMode: RecordingMode = .keyframes, gifSettings: GIFRecordingSettings = .init(),
+         tag: AssetTag? = nil, allowsTagSelection: Bool = true,
          colorFormat: ScreenshotColorFormat? = nil, colorPasteboard: NSPasteboard = .general,
          showsFullScreenCrosshair: Bool = UserDefaults.standard.object(forKey: "screenshotShowsFullScreenCrosshair") == nil
             || UserDefaults.standard.bool(forKey: "screenshotShowsFullScreenCrosshair"),
@@ -110,6 +116,7 @@ final class SelectionView: NSView {
         self.image = image
         self.mode = mode
         self.recordingMode = recordingMode
+        self.gifSettings = gifSettings
         self.assetTag = tag
         self.allowsTagSelection = allowsTagSelection
         self.colorFormat = colorFormat ?? .saved()
@@ -226,7 +233,10 @@ final class SelectionView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self))
+        // Re-entry must still arrive after a click on another display takes keyboard focus.
+        // AppKit requires cursorUpdate to use a separate key-window tracking area.
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self))
     }
 
     override func cursorUpdate(with event: NSEvent) {
@@ -278,6 +288,10 @@ final class SelectionView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !finished else { return }
+        if event.type == .mouseEntered, let window, window.isVisible, !window.isKeyWindow {
+            window.makeKey()
+        }
         pointer = convert(event.locationInWindow, from: nil)
         isPointerInside = bounds.contains(pointer)
         updateColorSample()
@@ -611,12 +625,14 @@ final class SelectionView: NSView {
         for container in [toolbar, colorPalette, mosaicOptions] {
             container.subviews.forEach { $0.removeFromSuperview() }
         }
-        for control in [fontSizePicker, mosaicBrushPicker, mosaicSizePicker, recordingModePicker, mosaicShapePicker, tagPicker] as [NSControl] {
+        for control in [fontSizePicker, mosaicBrushPicker, mosaicSizePicker, recordingModePicker, gifFrameRatePicker, gifQualityPicker, mosaicShapePicker, tagPicker] as [NSControl] {
             NSLayoutConstraint.deactivate(control.constraints)
         }
         fontSizePicker.removeAllItems()
         mosaicBrushPicker.removeAllItems()
         mosaicSizePicker.removeAllItems()
+        gifFrameRatePicker.removeAllItems()
+        gifQualityPicker.removeAllItems()
         buttons.removeAll(keepingCapacity: true)
         buildToolbar()
         colorPalette.isHidden = !showingColors
@@ -715,9 +731,9 @@ final class SelectionView: NSView {
             recordingModePicker.controlSize = .small
             recordingModePicker.segmentStyle = .texturedRounded
             recordingModePicker.font = .systemFont(ofSize: 12)
-            recordingModePicker.segmentCount = RecordingMode.allCases.count
+            recordingModePicker.segmentCount = Self.videoRecordingModes.count
             recordingModePicker.trackingMode = .selectOne
-            for (index, recordingMode) in RecordingMode.allCases.enumerated() {
+            for (index, recordingMode) in Self.videoRecordingModes.enumerated() {
                 recordingModePicker.setLabel("", forSegment: index)
                 recordingModePicker.setImage(NSImage(systemSymbolName: recordingMode.toolbarSymbol,
                                                      accessibilityDescription: recordingMode.toolbarTitle)!
@@ -739,6 +755,41 @@ final class SelectionView: NSView {
             button("cancel", L("取消 Esc"), "xmark", #selector(cancel))
             button("start", L("开始录屏"), "record.circle", #selector(confirm))
             buttons["start"]!.toolTip = L("开始录屏") + "\n" + L("录屏不支持录音，主要用于后续按帧截取图片。")
+        case .gifRecording:
+            let badge = NSTextField(labelWithString: "GIF")
+            badge.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
+            badge.textColor = .secondaryLabelColor
+            badge.alignment = .center
+            badge.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            badge.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            stack.addArrangedSubview(badge)
+            gifFrameRatePicker.identifier = NSUserInterfaceItemIdentifier("gif-frame-rate")
+            gifFrameRatePicker.addItems(withTitles: GIFRecordingSettings.frameRates.map { "\($0) fps" })
+            gifFrameRatePicker.selectItem(withTitle: "\(gifSettings.frameRate) fps")
+            gifFrameRatePicker.target = self
+            gifFrameRatePicker.action = #selector(selectGIFFrameRate)
+            gifFrameRatePicker.toolTip = L("GIF 帧率") + "\n" + L("帧率越高，动作越流畅，文件也越大。")
+            gifFrameRatePicker.setAccessibilityLabel(L("GIF 帧率"))
+            gifFrameRatePicker.widthAnchor.constraint(equalToConstant: 78).isActive = true
+            gifQualityPicker.identifier = NSUserInterfaceItemIdentifier("gif-quality")
+            gifQualityPicker.addItems(withTitles: GIFRecordingQuality.allCases.map(\.title))
+            gifQualityPicker.selectItem(at: GIFRecordingQuality.allCases.firstIndex(of: gifSettings.quality)!)
+            gifQualityPicker.target = self
+            gifQualityPicker.action = #selector(selectGIFQuality)
+            gifQualityPicker.toolTip = L("GIF 画质") + "\n" + L("画质影响输出尺寸；默认设置兼顾清晰度与体积。")
+            gifQualityPicker.setAccessibilityLabel(L("GIF 画质"))
+            gifQualityPicker.widthAnchor.constraint(equalToConstant: 148).isActive = true
+            for picker in [gifFrameRatePicker, gifQualityPicker] {
+                picker.focusRingType = .none
+                picker.controlSize = .small
+                picker.bezelStyle = .texturedRounded
+                picker.font = .systemFont(ofSize: 12)
+                picker.heightAnchor.constraint(equalToConstant: 28).isActive = true
+                stack.addArrangedSubview(picker)
+            }
+            button("cancel", L("取消 Esc"), "xmark", #selector(cancel))
+            button("start-gif-recording", L("开始录制 GIF"), "record.circle", #selector(confirm))
+            buttons["start-gif-recording"]!.toolTip = L("GIF 无声音，完成后复制到剪贴板；隐私模式下不自动保存到保管箱。")
         case .fixedCapture:
             addTagPicker()
             button("cancel", L("取消 Esc"), "xmark", #selector(cancel))
@@ -820,13 +871,23 @@ final class SelectionView: NSView {
 
     func setRecordingMode(_ mode: RecordingMode) {
         recordingMode = mode
-        recordingModePicker.selectedSegment = RecordingMode.allCases.firstIndex(of: mode)!
+        recordingModePicker.selectedSegment = Self.videoRecordingModes.firstIndex(of: mode)!
         recordingModePicker.setAccessibilityValue(mode.toolbarTitle)
     }
 
     @objc private func selectRecordingMode(_ sender: NSSegmentedControl) {
-        setRecordingMode(RecordingMode.allCases[sender.selectedSegment])
+        setRecordingMode(Self.videoRecordingModes[sender.selectedSegment])
         onRecordingModeChange?(recordingMode)
+        window?.makeFirstResponder(self)
+    }
+
+    @objc private func selectGIFFrameRate(_ sender: NSPopUpButton) {
+        gifSettings.frameRate = GIFRecordingSettings.frameRates[sender.indexOfSelectedItem]
+        window?.makeFirstResponder(self)
+    }
+
+    @objc private func selectGIFQuality(_ sender: NSPopUpButton) {
+        gifSettings.quality = GIFRecordingQuality.allCases[sender.indexOfSelectedItem]
         window?.makeFirstResponder(self)
     }
 

@@ -231,6 +231,7 @@ final class RecordingControlsView: NSVisualEffectView {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 6
+        row.detachesHiddenViews = true
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
@@ -248,6 +249,7 @@ final class RecordingControlsView: NSVisualEffectView {
         self.canPause = canPause
         self.mode = mode
         updateModeIcon()
+        tagPicker.isHidden = mode == .gif
         tagPicker.assetTag = tag
         transitioning = false
         stopping = false
@@ -286,8 +288,6 @@ final class RecordingControlsView: NSVisualEffectView {
         metrics.stringValue = L("\(formattedTime) · \(frameCount) 帧")
         stop.title = ""
         stop.imagePosition = .imageOnly
-        stop.toolTip = L("停止录屏并保存录制")
-        stop.setAccessibilityLabel(L("停止并保存"))
         tagPicker.toolTip = L("为这次录制设置颜色标签")
         updateControls()
     }
@@ -305,7 +305,7 @@ final class RecordingControlsView: NSVisualEffectView {
         } else if transitioning {
             status.stringValue = L("正在切换…")
         } else {
-            status.stringValue = isPaused ? L("已暂停") : L("正在录屏")
+            status.stringValue = isPaused ? L("已暂停") : mode == .gif ? L("正在录制 GIF") : L("正在录屏")
         }
         indicator.image = NSImage(systemSymbolName: isPaused ? "pause.circle.fill" : "record.circle.fill", accessibilityDescription: status.stringValue)
         indicator.contentTintColor = isPaused ? .systemOrange : .systemGreen
@@ -315,6 +315,8 @@ final class RecordingControlsView: NSVisualEffectView {
         pause.imagePosition = .imageOnly
         pause.toolTip = isPaused ? L("继续录屏") : L("暂停录屏，暂停时间不计入录制")
         pause.isEnabled = canPause && !transitioning && !stopping
+        stop.toolTip = mode == .gif ? L("完成 GIF 录制") : L("停止录屏并保存录制")
+        stop.setAccessibilityLabel(mode == .gif ? L("完成 GIF 录制") : L("停止并保存"))
         stop.isEnabled = canStop && !transitioning && !stopping
         tagPicker.isEnabled = !stopping
         notifySizeChange()

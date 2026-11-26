@@ -660,9 +660,10 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func importImages(_ urls: [URL]) throws {
-        var imported: [UUID] = []
-        defer { if !imported.isEmpty { scheduleStorageRefresh(protecting: imported) } }
+    @discardableResult
+    func importImages(_ urls: [URL], source: String = "导入") throws -> [VaultImage] {
+        var imported: [VaultImage] = []
+        defer { if !imported.isEmpty { scheduleStorageRefresh(protecting: imported.map(\.id)) } }
         try withImageLock {
             try reloadImages()
             try reloadStorage()
@@ -673,7 +674,7 @@ final class LibraryStore: ObservableObject {
                 try AutomationAccess.check()
                 let id = UUID()
                 let item = VaultImage(id: id, filename: url.lastPathComponent, createdAt: Date(),
-                                      width: image.width, height: image.height, source: "导入",
+                                      width: image.width, height: image.height, source: source,
                                       directory: storage.screenshotDirectory?.appendingPathComponent(id.uuidString, isDirectory: true))
                 let directory = imageURL(item).deletingLastPathComponent()
                 try fileManager.createDirectory(at: directory, withIntermediateDirectories: false)
@@ -682,13 +683,14 @@ final class LibraryStore: ObservableObject {
                     try AutomationAccess.check()
                     try database.insert(item, remember: !defaults.bool(forKey: "privacyMode"))
                     images.insert(item, at: 0)
-                    imported.append(item.id)
+                    imported.append(item)
                 } catch {
                     try fileManager.removeItem(at: directory)
                     throw error
                 }
             }
         }
+        return imported
     }
 
     func importKeyframes(_ session: SavedSession) async throws -> Int {

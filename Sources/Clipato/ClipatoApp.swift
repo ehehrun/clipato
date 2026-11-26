@@ -43,6 +43,7 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     private var longScreenshotWindow: NSWindow?
     private var shortcutSettingsWindow: NSWindow?
     private var isPresentingError = false
+    private let recordingToast = RecordingCompletionToast()
 
     init(model: AppModel) {
         self.model = model
@@ -61,6 +62,11 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         statusItem.button?.setAccessibilityLabel("Clipato")
         statusItem.button?.toolTip = L("Clipato · 截图与录屏")
         installStatusMenu()
+        model.recordingCompletion.receive(on: RunLoop.main).sink { [weak self] completion in
+            guard let self else { return }
+            guard self.mainWindow?.isVisible != true || self.mainWindow?.isKeyWindow != true else { return }
+            self.recordingToast.show(message: completion.message, displayID: completion.displayID)
+        }.store(in: &subscriptions)
         model.recorder.$isRecording.combineLatest(model.recorder.$isPaused).receive(on: RunLoop.main).sink { [weak self] recording, paused in
             self?.statusItem?.button?.image = recording
                 ? NSImage(systemSymbolName: paused ? "pause.circle.fill" : "record.circle.fill", accessibilityDescription: nil)
@@ -77,7 +83,8 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             .receive(on: RunLoop.main).sink { [weak self] _, _ in
                 self?.updateShortcutMenuItems()
             }.store(in: &subscriptions)
-        model.$selectingRecordingRegion.receive(on: RunLoop.main).sink { [weak self] _ in
+        model.$selectingRecordingRegion.receive(on: RunLoop.main).sink { [weak self] selecting in
+            if selecting { self?.recordingToast.dismiss() }
             self?.updateShortcutMenuItems()
         }.store(in: &subscriptions)
         model.$recordingBusy.receive(on: RunLoop.main).sink { [weak self] _ in
@@ -86,7 +93,8 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         model.$fixedCaptureRegion.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.updateShortcutMenuItems()
         }.store(in: &subscriptions)
-        model.$capturing.receive(on: RunLoop.main).sink { [weak self] _ in
+        model.$capturing.receive(on: RunLoop.main).sink { [weak self] capturing in
+            if capturing { self?.recordingToast.dismiss() }
             self?.updateShortcutMenuItems()
         }.store(in: &subscriptions)
         model.$clearingLibraryData.receive(on: RunLoop.main).sink { [weak self] _ in
@@ -134,6 +142,7 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
             .captureDisplay: { [weak model] in model?.capture(region: false) },
             .pinLatest: { [weak model] in model?.pinLatest() },
             .toggleRecording: { [weak model] in model?.toggleRecording() },
+            .toggleGIFRecording: { [weak model] in model?.toggleGIFRecording() },
             .fixedCapture: { [weak model] in model?.captureFixedRegion() },
             .togglePinnedMousePassthrough: { [weak model] in model?.screenshots.togglePinnedMousePassthrough() }
         ])
@@ -157,6 +166,7 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         shortcutMenuItems[.togglePinnedMousePassthrough] = add(L("贴图鼠标穿透"), action: #selector(togglePinnedMousePassthrough), to: menu)
         menu.addItem(.separator())
         shortcutMenuItems[.toggleRecording] = add(L("区域录屏"), action: #selector(toggleRecording), to: menu)
+        shortcutMenuItems[.toggleGIFRecording] = add(L("录制 GIF"), action: #selector(toggleGIFRecording), to: menu)
         pauseRecordingItem = add(L("暂停录屏"), action: #selector(toggleRecordingPause), to: menu)
         menu.addItem(.separator())
         add(L("快捷键设置…"), action: #selector(showShortcutSettings), to: menu)
@@ -205,7 +215,9 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
 
     private func updateShortcutMenuItems() {
         for (action, item) in shortcutMenuItems {
-            let title = action == .toggleRecording
+            let title = action == .toggleGIFRecording
+                ? (model.recorder.isRecording && model.recorder.mode == .gif ? L("停止并生成 GIF") : L("录制 GIF"))
+                : action == .toggleRecording
                 ? (model.recorder.isRecording ? L("停止并保存录屏") : (model.selectingRecordingRegion ? L("正在框选录屏区域…") : L("区域录屏")))
                 : (action == .fixedCapture && model.fixedCaptureRegion != nil ? L("固定区域再截一张") : action.title)
             if let shortcut = model.shortcuts.bindings[action] {
@@ -221,6 +233,8 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         pauseRecordingItem?.isHidden = !model.recorder.isRecording
         pauseRecordingItem?.isEnabled = model.recorder.isRecording && !model.recordingBusy
         shortcutMenuItems[.toggleRecording]?.isEnabled = !model.clearingLibraryData && !model.recordingBusy && model.fixedCaptureRegion == nil
+        shortcutMenuItems[.toggleGIFRecording]?.isEnabled = !model.clearingLibraryData && !model.recordingBusy && !model.capturing
+            && model.fixedCaptureRegion == nil && (!model.recorder.isRecording || model.recorder.mode == .gif)
         shortcutMenuItems[.fixedCapture]?.isEnabled = model.canCaptureFixedRegion
         for action in [ShortcutAction.captureRegion, .captureDisplay] {
             shortcutMenuItems[action]?.isEnabled = !model.clearingLibraryData && !model.capturing && !model.recordingBusy && model.fixedCaptureRegion == nil
@@ -437,6 +451,7 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updateShortcutMenuItems()
     }
     @objc private func toggleRecording() { model.toggleRecording() }
+    @objc private func toggleGIFRecording() { model.toggleGIFRecording() }
     @objc private func toggleRecordingPause() { model.toggleRecordingPause() }
     @objc private func toggleShortcuts() { model.shortcuts.setEnabled(!model.shortcuts.isEnabled) }
     @objc private func clearOperationHistory() {
@@ -552,6 +567,7 @@ final class ClipatoDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, 
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        recordingToast.dismiss()
         model.screenshots.cancelSelection()
         model.recordingOverlay.hide()
         model.fixedCaptureOverlay.hide()

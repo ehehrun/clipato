@@ -156,7 +156,7 @@ final class SelectionWindowSnapTests: XCTestCase {
     }
 
     func testOtherCaptureModesAndAnInitialFullScreenSelectionDoNotOfferWindowSnap() throws {
-        for mode in [SelectionView.Mode.recording, .fixedCapture] {
+        for mode in [SelectionView.Mode.recording, .gifRecording, .fixedCapture] {
             let view = try makeView(mode: mode)
             move(CGPoint(x: 180, y: 140), in: view)
             XCTAssertNil(view.hoveredWindow)

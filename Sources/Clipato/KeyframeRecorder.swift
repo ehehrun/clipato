@@ -64,11 +64,15 @@ final class KeyframeRecorder: ObservableObject {
 
     func start(
         display: SCDisplay, region: RecordingRegion, directory: URL, sampleRate: Double,
-        threshold: Double, maxDimension: Int, mode: RecordingMode = .keyframes, name: String? = nil
+        threshold: Double, maxDimension: Int, mode: RecordingMode = .keyframes, name: String? = nil,
+        gifSettings: GIFRecordingSettings = .init()
     ) async throws {
         guard !isStarting, stream == nil else { throw KeyframeRecordingError.alreadyRecording }
-        guard sampleRate.isFinite, sampleRate > 0,
-              mode == .video ? [15.0, 30.0, 60.0].contains(sampleRate) : sampleRate <= 30,
+        if mode == .gif { try gifSettings.validate() }
+        let recordingFrameRate = mode == .gif ? Double(gifSettings.frameRate) : sampleRate
+        let recordingMaxDimension = mode == .gif ? gifSettings.maximumDimension : maxDimension
+        guard recordingFrameRate.isFinite, recordingFrameRate > 0,
+              mode == .video ? [15.0, 30.0, 60.0].contains(recordingFrameRate) : recordingFrameRate <= 30,
               threshold.isFinite, (0...1).contains(threshold), maxDimension > 0 else {
             throw KeyframeRecordingError.invalidSettings
         }
@@ -91,7 +95,7 @@ final class KeyframeRecorder: ObservableObject {
             let filter = SCContentFilter(display: display, excludingApplications: ownApplications, exceptingWindows: [])
             let configuration = try region.configuration(
                 displayID: display.displayID, contentRect: filter.contentRect,
-                pointPixelScale: CGFloat(filter.pointPixelScale), maxDimension: maxDimension
+                pointPixelScale: CGFloat(filter.pointPixelScale), maxDimension: recordingMaxDimension
             )
             if mode == .video {
                 configuration.width = configuration.width / 2 * 2
@@ -100,10 +104,10 @@ final class KeyframeRecorder: ObservableObject {
             }
             let width = configuration.width
             let height = configuration.height
-            configuration.minimumFrameInterval = CMTime(seconds: 1 / sampleRate, preferredTimescale: 60_000)
+            configuration.minimumFrameInterval = CMTime(seconds: 1 / recordingFrameRate, preferredTimescale: 60_000)
             configuration.queueDepth = 2
             configuration.pixelFormat = kCVPixelFormatType_32BGRA
-            configuration.showsCursor = mode == .video
+            configuration.showsCursor = mode != .keyframes
             configuration.capturesAudio = false
             configuration.colorSpaceName = CGColorSpace.sRGB
 
@@ -165,6 +169,12 @@ final class KeyframeRecorder: ObservableObject {
                     width: width, height: height, onFrame: onFrame, onFailure: onFailure,
                     filename: name.map { $0 + ".mp4" } ?? "recording.mp4"
                 )
+            case .gif:
+                writer = try GIFRecordingWriter(
+                    directory: directory, started: recordingStarted, settings: gifSettings,
+                    width: width, height: height, onFrame: onFrame, onFailure: onFailure,
+                    filename: name.map { $0 + ".gif" } ?? "recording.gif"
+                )
             }
             let stream = SCStream(filter: filter, configuration: configuration, delegate: writer)
             try stream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: writer.queue)
@@ -187,7 +197,7 @@ final class KeyframeRecorder: ObservableObject {
             isStarting = false
             if startupFailure != nil { _ = try await stop() }
             isRecording = true
-            status = mode == .video ? L("直接录制中") : L("关键帧录制中")
+            status = mode == .gif ? L("GIF 录制中") : mode == .video ? L("直接录制中") : L("关键帧录制中")
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, self.isRecording, !self.isPaused, self.stoppingTask == nil else { return }
@@ -267,7 +277,7 @@ final class KeyframeRecorder: ObservableObject {
         await writer.resume(at: time)
         timeline.resume(at: time)
         isPaused = false
-        status = mode == .video ? L("直接录制中") : L("关键帧录制中")
+        status = mode == .gif ? L("GIF 录制中") : mode == .video ? L("直接录制中") : L("关键帧录制中")
     }
 
     func stop() async throws -> URL {
@@ -280,7 +290,7 @@ final class KeyframeRecorder: ObservableObject {
             guard let stream, let writer else { throw KeyframeRecordingError.notRecording }
             timer?.invalidate()
             timer = nil
-            status = mode == .video ? L("正在保存视频…") : L("正在保存关键帧…")
+            status = mode == .gif ? L("正在保存 GIF…") : mode == .video ? L("正在保存视频…") : L("正在保存关键帧…")
 
             let stoppedAt = await writer.pause()
             timeline.pause(at: stoppedAt)
@@ -317,7 +327,7 @@ final class KeyframeRecorder: ObservableObject {
             do {
                 frameCount = try result.get()
                 if let stopError { throw stopError }
-                status = mode == .video ? L("已保存视频") : L("已保存 \(frameCount) 张关键帧")
+                status = mode == .gif ? L("GIF 已保存") : mode == .video ? L("已保存视频") : L("已保存 \(frameCount) 张关键帧")
                 return writer.directory
             } catch {
                 let finalError: Error

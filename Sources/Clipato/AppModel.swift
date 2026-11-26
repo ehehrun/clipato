@@ -116,6 +116,7 @@ final class AppModel: ObservableObject {
     @Published var privacyMode: Bool {
         didSet {
             defaults.set(privacyMode, forKey: "privacyMode")
+            if privacyMode, gifRecordingPrivate != nil { gifRecordingPrivate = true }
             if privacyMode && !oldValue { MCPSettings.setEnabled(false, in: defaults) }
             defaults.synchronize()
         }
@@ -170,6 +171,7 @@ final class AppModel: ObservableObject {
     }
     @Published var errorMessage: String?
     @Published private(set) var screenCapturePermissionError: String?
+    let recordingCompletion = PassthroughSubject<(message: String, displayID: CGDirectDisplayID?), Never>()
     @Published var notice: String? {
         didSet {
             noticeDismissal?.invalidate()
@@ -185,6 +187,7 @@ final class AppModel: ObservableObject {
     @Published var capturing = false
     @Published var sampleRate = 2.0
     @Published var recordingMode: RecordingMode = .keyframes
+    @Published var gifRecordingSettings = GIFRecordingSettings()
     @Published var videoFrameRate = 30.0
     @Published var threshold = 0.025
     @Published var maxDimension = 1920
@@ -228,6 +231,8 @@ final class AppModel: ObservableObject {
     let libraryRoot: URL
     private let defaults: UserDefaults
     private var recordingTag: AssetTag?
+    private var gifRecordingPrivate: Bool?
+    private(set) var gifRecordingDirectory: URL?
     private var recordingTask: Task<Void, Never>?
     private var recordingMetrics: AnyCancellable?
     private var collectionChanges: AnyCancellable?
@@ -292,7 +297,8 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.recordingOverlay.hide()
             self.recordingRegion = nil
-            self.reportRecordingError(error)
+            if self.recorder.mode == .gif { self.reportGIFRecordingError(error) }
+            else { self.reportRecordingError(error) }
             self.recordingBusy = false
         }
     }
@@ -799,7 +805,11 @@ final class AppModel: ObservableObject {
     func copy(_ item: VaultImage) {
         guard let library else { return }
         do {
-            copyImage(try library.loadImage(item))
+            if item.filename.lowercased().hasSuffix(".gif") {
+                try copyGIF(at: library.imageURL(item))
+            } else {
+                copyImage(try library.loadImage(item))
+            }
             notice = L("图片已复制")
         } catch { errorMessage = error.localizedDescription }
     }
@@ -807,11 +817,12 @@ final class AppModel: ObservableObject {
     func export(_ image: CGImage, filename: String) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        panel.directoryURL = privacyMode
+        panel.directoryURL = SavePanelDirectory.lastDirectory(defaults: defaults) ?? (privacyMode
             ? FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
-            : library?.screenshotDirectory
+            : library?.screenshotDirectory)
         panel.nameFieldStringValue = filename
         if panel.runModal() == .OK, let url = panel.url {
+            SavePanelDirectory.rememberFile(url, defaults: defaults)
             do {
                 try LibraryStore.writePNG(image, to: url)
                 notice = L("已导出 \(url.lastPathComponent)")
@@ -974,9 +985,10 @@ final class AppModel: ObservableObject {
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
             panel.canCreateDirectories = true
-            panel.directoryURL = library?.screenshotDirectory
+            panel.directoryURL = SavePanelDirectory.lastDirectory(defaults: defaults) ?? library?.screenshotDirectory
             panel.message = L("选择导出目录；已有同名文件不会被覆盖。")
             guard panel.runModal() == .OK, let directory = panel.url else { return }
+            SavePanelDirectory.rememberDirectory(directory, defaults: defaults)
             output = directory
         } else {
             let panel = NSSavePanel()
@@ -995,10 +1007,11 @@ final class AppModel: ObservableObject {
             }
             panel.title = L("导出\(options.mode == .zip ? L("压缩包") : options.mode == .video ? options.videoFormat.title : "PDF")")
             panel.allowedContentTypes = [contentType]
-            panel.directoryURL = library?.screenshotDirectory
+            panel.directoryURL = SavePanelDirectory.lastDirectory(defaults: defaults) ?? library?.screenshotDirectory
             panel.nameFieldStringValue = "Clipato-\(images.count)张图片.\(extensionName)"
             panel.isExtensionHidden = false
             guard panel.runModal() == .OK, let url = panel.url else { return }
+            SavePanelDirectory.rememberFile(url, defaults: defaults)
             output = url
         }
         let id = UUID()
@@ -1045,12 +1058,13 @@ final class AppModel: ObservableObject {
         guard !isExporting else { return }
         let panel = NSSavePanel()
         panel.title = L("导出\(format.title)")
-        panel.directoryURL = library?.recordingDirectory
+        panel.directoryURL = SavePanelDirectory.lastDirectory(defaults: defaults) ?? library?.recordingDirectory
         panel.allowedContentTypes = [format == .mp4 ? .mpeg4Movie : .gif]
         let name = session.manifest.name ?? "Clipato-\(session.id.uuidString.prefix(8))"
         panel.nameFieldStringValue = "\(name).\(format.rawValue)"
         panel.isExtensionHidden = false
         guard panel.runModal() == .OK, let output = panel.url else { return }
+        SavePanelDirectory.rememberFile(output, defaults: defaults)
 
         exportingSessionID = session.id
         exportFilename = output.lastPathComponent
@@ -1320,7 +1334,17 @@ final class AppModel: ObservableObject {
     }
 
     func toggleRecording() {
-        guard !clearingLibraryData, !recordingBusy, fixedCaptureRegion == nil, let library, recorder.isRecording || !capturing else { return }
+        toggleRecording(gif: false)
+    }
+
+    func toggleGIFRecording() {
+        guard !recorder.isRecording || recorder.mode == .gif else { return }
+        toggleRecording(gif: true)
+    }
+
+    private func toggleRecording(gif: Bool) {
+        guard !clearingLibraryData, !recordingBusy, fixedCaptureRegion == nil, recorder.isRecording || !capturing else { return }
+        let isGIFRecording = recorder.isRecording ? recorder.mode == .gif : gif
         recordingBusy = true
         section = .recordings
         selectingRecordingRegion = !recorder.isRecording
@@ -1337,30 +1361,53 @@ final class AppModel: ObservableObject {
             do {
                 if recorder.isRecording {
                     try await stopRecording()
-                    notice = L("\(recorder.mode.title)已保存")
                 } else {
-                    try library.validateStorageDirectory(for: .recordings)
-                    guard let selection = try await screenshots.selectRecordingRegion(mode: recordingMode) else {
-                        notice = L("已取消录屏选区")
-                        return
+                    let output: URL
+                    if isGIFRecording {
+                        output = try prepareGIFRecording()
+                    } else {
+                        guard let library else { throw CollectionError.missingAsset }
+                        output = try library.newRecordingDirectory()
+                    }
+                    directory = output
+                    let region: RecordingRegion
+                    let mode: RecordingMode
+                    if isGIFRecording {
+                        guard let selection = try await screenshots.selectGIFRecordingRegion(settings: gifRecordingSettings) else {
+                            throw CancellationError()
+                        }
+                        region = selection.region
+                        gifRecordingSettings = selection.settings
+                        mode = .gif
+                        recordingTag = nil
+                    } else {
+                        guard let selection = try await screenshots.selectRecordingRegion(mode: recordingMode) else {
+                            notice = L("已取消录屏选区")
+                            return
+                        }
+                        region = selection.region
+                        recordingMode = selection.mode
+                        recordingTag = selection.tag
+                        mode = selection.mode
                     }
                     try Task.checkCancellation()
-                    let region = selection.region
-                    recordingMode = selection.mode
-                    recordingTag = selection.tag
                     selectingRecordingRegion = false
                     let displays = try await recorder.availableDisplays()
                     try Task.checkCancellation()
                     guard let display = displays.first(where: { $0.displayID == region.displayID }) else {
                         throw NSError(domain: "Clipato", code: 1, userInfo: [NSLocalizedDescriptionKey: L("所选屏幕已断开，请重新框选录屏区域。")])
                     }
-                    let output = try library.newRecordingDirectory()
-                    let filename = try CaptureFileNaming.nextFilename(for: .recording, extension: "mp4", defaults: defaults)
-                    let name = (filename as NSString).deletingPathExtension
-                    directory = output
+                    let name: String?
+                    if mode == .gif {
+                        name = nil
+                    } else {
+                        let filename = try CaptureFileNaming.nextFilename(for: .recording, extension: "mp4", defaults: defaults)
+                        name = (filename as NSString).deletingPathExtension
+                    }
                     try await recorder.start(display: display, region: region, directory: output,
-                                             sampleRate: selection.mode == .video ? videoFrameRate : sampleRate,
-                                             threshold: threshold, maxDimension: maxDimension, mode: selection.mode, name: name)
+                                             sampleRate: mode == .gif ? Double(gifRecordingSettings.frameRate) : mode == .video ? videoFrameRate : sampleRate,
+                                             threshold: threshold, maxDimension: mode == .gif ? gifRecordingSettings.maximumDimension : maxDimension,
+                                             mode: mode, name: name, gifSettings: gifRecordingSettings)
                     screenCapturePermissionError = nil
                     do { try recordingOverlay.show(region, mode: recorder.mode, tag: recordingTag) }
                     catch {
@@ -1375,11 +1422,16 @@ final class AppModel: ObservableObject {
                     notice = L("正在录制绿框内区域 · 浮动条可暂停、继续或停止")
                 }
             } catch is CancellationError {
+                if isGIFRecording {
+                    do { try discardGIFRecording() }
+                    catch { reportCaptureError(error, message: error.localizedDescription); return }
+                }
                 notice = L("已取消录屏选区")
             } catch {
                 recordingOverlay.hide()
                 recordingRegion = nil
-                reportRecordingError(error, includeSession: directory != nil && directory == recorder.sessionDirectory)
+                if isGIFRecording { reportGIFRecordingError(error) }
+                else { reportRecordingError(error, includeSession: directory != nil && directory == recorder.sessionDirectory) }
             }
         }
     }
@@ -1409,11 +1461,12 @@ final class AppModel: ObservableObject {
             recordingRegion = nil
         }
         let directory = recorder.sessionDirectory
+        let isGIF = recorder.mode == .gif
         var stopError: Error?
         do { _ = try await recorder.stop() }
         catch { stopError = error }
         do {
-            if let directory { try library?.setRecordingTag(recordingTag, for: directory) }
+            if let directory, !isGIF { try library?.setRecordingTag(recordingTag, for: directory) }
         } catch {
             if let stopError {
                 throw NSError(domain: "Clipato", code: 1, userInfo: [NSLocalizedDescriptionKey:
@@ -1421,8 +1474,91 @@ final class AppModel: ObservableObject {
             }
             throw error
         }
+        if isGIF {
+            do {
+                if let stopError { throw stopError }
+                guard let directory else { throw CocoaError(.fileReadNoSuchFile) }
+                try finishGIFRecording(at: directory.appendingPathComponent("recording.gif"))
+            } catch {
+                let recordingError = error
+                do { try discardGIFRecording() }
+                catch { throw KeyframeRecordingError.multipleFailures(recordingError, error) }
+                throw recordingError
+            }
+            return
+        }
         if let stopError { throw stopError }
         try library?.reloadSessions()
+        let message = L("\(recorder.mode.title)已保存")
+        notice = message
+        recordingCompletion.send((message, recordingRegion?.displayID))
+    }
+
+    func prepareGIFRecording() throws -> URL {
+        if !privacyMode {
+            guard let library else { throw CollectionError.missingAsset }
+            try library.validateStorageDirectory(for: .screenshots)
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Clipato-GIF-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        gifRecordingDirectory = directory
+        gifRecordingPrivate = privacyMode
+        return directory
+    }
+
+    func discardGIFRecording() throws {
+        let directory = gifRecordingDirectory
+        gifRecordingDirectory = nil
+        gifRecordingPrivate = nil
+        if let directory { try FileManager.default.removeItem(at: directory) }
+    }
+
+    private func reportGIFRecordingError(_ error: Error) {
+        var failure = error
+        do { try discardGIFRecording() }
+        catch { failure = KeyframeRecordingError.multipleFailures(failure, error) }
+        reportCaptureError(failure, message: failure.localizedDescription)
+    }
+
+    func finishGIFRecording(at url: URL, pasteboard: NSPasteboard = .general) throws {
+        let isPrivate = gifRecordingPrivate == true || privacyMode
+        let message: String
+        do {
+            if isPrivate {
+                try copyGIF(at: url, to: pasteboard, includeFileURL: false)
+                message = L("GIF 已复制到剪贴板，未保存到保管箱")
+            } else {
+                guard let library else { throw CollectionError.missingAsset }
+                let filename = try CaptureFileNaming.nextFilename(for: .recording, extension: "gif", defaults: defaults)
+                let namedURL = url.deletingLastPathComponent().appendingPathComponent(filename)
+                if namedURL != url { try FileManager.default.moveItem(at: url, to: namedURL) }
+                let item = try library.importImages([namedURL], source: "GIF 录制")[0]
+                section = .images
+                selected = [item.id]
+                try copyGIF(at: library.imageURL(item), to: pasteboard)
+                message = L("GIF 已保存到保管箱，并复制到剪贴板")
+            }
+        } catch {
+            let recordingError = error
+            do { try discardGIFRecording() }
+            catch { throw KeyframeRecordingError.multipleFailures(recordingError, error) }
+            throw recordingError
+        }
+        try discardGIFRecording()
+        notice = message
+        recordingCompletion.send((message, recordingRegion?.displayID))
+    }
+
+    private func copyGIF(at url: URL, to pasteboard: NSPasteboard = .general, includeFileURL: Bool = true) throws {
+        let item = NSPasteboardItem()
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        item.setData(data, forType: NSPasteboard.PasteboardType(UTType.gif.identifier))
+        if includeFileURL { item.setString(url.absoluteString, forType: .fileURL) }
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([item]) else {
+            let message = includeFileURL ? L("GIF 已保存，但无法写入剪贴板。") : L("GIF 无法写入剪贴板。")
+            throw NSError(domain: "Clipato", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
     }
 
     func cancelRecordingSelection() async {

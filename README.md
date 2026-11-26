@@ -57,7 +57,7 @@ macOS may call the permission page **Screen & System Audio Recording**; this is 
 | --- | --- |
 | `F1` | Capture Area |
 | `F2` | Pin Latest Image |
-| `F3` | Start recording; press again while recording to stop and save |
+| `F3` | Start GIF recording; press again to save and copy the GIF |
 | `F4` | Start Continuous Area Capture; press again to capture the next image |
 | `F5` | Toggle pinned image click-through |
 
@@ -151,13 +151,25 @@ Open **System Settings → Recordings** to choose the type for your next recordi
 
 ### Start, pause, and stop
 
-1. Press `F3`, start a recording from the menu bar, or click **Start Recording** on the Recordings page.
+1. Choose **Record Area** from the menu bar, or click **Start Recording** on the Recordings page.
 2. Select and adjust the recording area, confirm the recording type on the toolbar, then start.
 3. A green border marks the recording area. Use the floating toolbar to pause, resume, or stop. Paused time is excluded from the recording.
-4. Click stop or press `F3` again to finish and save.
+4. Click stop on the floating toolbar to finish and save.
 5. Open **Recordings** in the Console to view the result. Double-click to play.
 
 Move the pointer to the target display before starting. The recording area is fixed once recording begins.
+
+### Record a GIF directly
+
+1. Choose **Record GIF** from the menu bar menu or the Recordings page, then select and adjust the area.
+2. The defaults are **30 fps and Balanced quality**. Click record on the toolbar to start without changing any settings.
+3. Pause or resume from the floating toolbar, then click stop to finish. In normal mode, Clipato generates the complete GIF, saves it to the Vault, and copies it to the clipboard for pasting and sharing.
+
+**In Privacy Mode, GIF recordings are copied to the clipboard without being automatically saved to the Vault or updating recent-image history.** Recording uses a temporary file for encoding, which is removed on completion. The clipboard does not include the temporary file path.
+
+The dedicated GIF toolbar offers **10, 15, 24, or 30 fps**. Higher frame rates make motion smoother and usually increase file size. Quality presets set the maximum longest edge: **Smaller File at 800 px, Balanced at 1280 px, and More Detail at 1920 px**. Paused time is excluded, and GIF recordings contain no audio.
+
+`F3` now starts and stops GIF recording. Area recording has no default shortcut. Existing area-recording bindings migrate while custom GIF and unrelated bindings stay intact; deliberately cleared shortcuts stay cleared. Customize bindings in **Keyboard Shortcuts**. When recording finishes, a brief desktop confirmation appears at the top center of the recorded display even with the console closed.
 
 ### Play and export keyframe recordings
 
@@ -279,6 +291,8 @@ PNG output is lossless. For JPEG and PDF, `100%` means the highest encoding qual
 
 For WebP, use **Image Processing → Convert Format**. Separate image exports do not directly overwrite files with the same name. For single-file exports such as PDF, ZIP, MP4, and GIF, confirm replacement in the system save dialog if you choose an existing file.
 
+Saving screenshots or collages and exporting images or recordings share the last confirmed save folder, including after restarting Clipato. Saving a file remembers its parent folder; exporting to a directory remembers the selected directory. Cancelling the dialog leaves this preference unchanged.
+
 ## Settings and data management
 
 ### Language, appearance, and shortcuts
@@ -335,7 +349,7 @@ To add it manually, click **Open Login Items Settings** to open the system page,
 
 Open **Security Settings → Privacy** and select **Enable Privacy Mode**. It is off by default.
 
-When enabled, screenshots are not automatically added to the Vault, and new recent-image history is not recorded. Existing media and history are retained. Explicit saves, exports, and screen recordings still write files to their respective locations.
+When enabled, screenshots are not automatically added to the Vault, and new recent-image history is not recorded. GIF recordings are copied to the clipboard without being automatically saved to the Vault; temporary encoding files are removed on completion. Existing media and history are retained. Explicit saves and exports, plus MP4 and keyframe recordings, still write files to their respective locations.
 
 Privacy mode turns off **Allow External Automation Calls** and **Enable MCP Service**, and prevents them from being enabled. Leaving privacy mode restores neither switch. To use Skills or CLI again, manually enable **Allow External Automation Calls** under **AI Terminal → Automation Access**; MCP also requires its separate service switch.
 

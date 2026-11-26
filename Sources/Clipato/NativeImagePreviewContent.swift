@@ -11,6 +11,7 @@ final class NativeImagePreviewContent: NSView {
 
     private let analyzer = ImageAnalyzer()
     private var image: CGImage?
+    private var animatedImage: NSImage?
     private var needsInitialFit = false
     private var analysisTask: Task<Void, Never>?
     private var analyzing = false
@@ -39,6 +40,10 @@ final class NativeImagePreviewContent: NSView {
 
     func display(_ image: CGImage) {
         analysisTask?.cancel()
+        imageView.animates = false
+        imageView.image = nil
+        animatedImage = nil
+        overlay.isHidden = false
         overlay.analysis = nil
         overlay.resetSelection()
         self.image = image
@@ -49,13 +54,26 @@ final class NativeImagePreviewContent: NSView {
         startNextAnalysis()
     }
 
+    func displayAnimation(_ image: NSImage) {
+        clear()
+        animatedImage = image
+        overlay.isHidden = true
+        needsInitialFit = true
+        updateImageGeometry()
+        fitImage()
+        updateAnimationPlayback()
+    }
+
     func clear() {
         analysisTask?.cancel()
         analysisTask = nil
         pendingAnalysis = nil
         image = nil
+        imageView.animates = false
         imageView.image = nil
+        animatedImage = nil
         imageView.setFrameSize(.zero)
+        overlay.isHidden = false
         overlay.analysis = nil
         overlay.resetSelection()
         needsInitialFit = false
@@ -71,6 +89,7 @@ final class NativeImagePreviewContent: NSView {
         super.viewDidMoveToWindow()
         updateImageGeometry()
         if needsInitialFit { fitImage() }
+        updateAnimationPlayback()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -79,7 +98,7 @@ final class NativeImagePreviewContent: NSView {
     }
 
     func fitImage() {
-        guard image != nil, window != nil else { return }
+        guard image != nil || animatedImage != nil, window != nil else { return }
         let viewport = scrollView.contentView.frame.size
         let size = imageView.frame.size
         guard viewport.width > 0, viewport.height > 0 else { return }
@@ -97,14 +116,30 @@ final class NativeImagePreviewContent: NSView {
     }
 
     func analyzeIfVisible() {
+        updateAnimationPlayback()
         startNextAnalysis()
     }
 
+    func updateAnimationPlayback() {
+        imageView.animates = animatedImage != nil && window?.isVisible == true
+            && window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
+    }
+
     private func updateImageGeometry() {
-        guard let image, let window else { return }
+        guard let window else { return }
         let scale = window.backingScaleFactor
-        let size = NSSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
-        imageView.image = NSImage(cgImage: image, size: size)
+        let size: NSSize
+        if let image {
+            size = NSSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
+            imageView.image = NSImage(cgImage: image, size: size)
+        } else if let animatedImage {
+            let representation = animatedImage.representations[0]
+            size = NSSize(width: CGFloat(representation.pixelsWide) / scale, height: CGFloat(representation.pixelsHigh) / scale)
+            animatedImage.size = size
+            if imageView.image !== animatedImage { imageView.image = animatedImage }
+        } else {
+            return
+        }
         imageView.setFrameSize(size)
         overlay.setContentsRectNeedsUpdate()
     }

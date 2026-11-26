@@ -1,5 +1,30 @@
 import AppKit
+import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
+
+enum ImagePreviewAsset {
+    case still(CGImage)
+    case animated(NSImage)
+
+    static func load(at url: URL) throws -> ImagePreviewAsset {
+        try Task.checkCancellation()
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            throw LibraryError.unreadableImage(url.lastPathComponent)
+        }
+        if CGImageSourceGetType(source) == UTType.gif.identifier as CFString, CGImageSourceGetCount(source) > 1 {
+            guard let image = NSImage(contentsOf: url),
+                  let representation = image.representations.first as? NSBitmapImageRep,
+                  let count = representation.value(forProperty: .frameCount) as? NSNumber,
+                  count.intValue > 1, representation.pixelsWide > 0, representation.pixelsHigh > 0 else {
+                throw LibraryError.unreadableImage(url.lastPathComponent)
+            }
+            try Task.checkCancellation()
+            return .animated(image)
+        }
+        return .still(try LibraryStore.readImage(at: url))
+    }
+}
 
 struct SystemImagePreview: NSViewRepresentable {
     @Binding var url: URL?
@@ -160,7 +185,7 @@ final class SystemImagePreviewView: NSView, NSWindowDelegate {
             do {
                 let image = try await Task.detached(priority: .userInitiated) {
                     try Task.checkCancellation()
-                    let image = try LibraryStore.readImage(at: requestedURL)
+                    let image = try ImagePreviewAsset.load(at: requestedURL)
                     try Task.checkCancellation()
                     return image
                 }.value
@@ -168,7 +193,10 @@ final class SystemImagePreviewView: NSView, NSWindowDelegate {
                 guard let self, let panel, let content,
                       self.requestedURL == requestedURL, self.controlledPanel === panel else { return }
                 self.loadTask = nil
-                content.display(image)
+                switch image {
+                case .still(let image): content.display(image)
+                case .animated(let image): content.displayAnimation(image)
+                }
                 if !panel.isVisible { self.show(panel) }
             } catch is CancellationError {
             } catch {
@@ -314,6 +342,11 @@ final class SystemImagePreviewView: NSView, NSWindowDelegate {
         sourceWindow = nil
         closing = false
         if let closedURL { onClose?(closedURL) }
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let panel = notification.object as? ImagePreviewWindow, controlledPanel === panel else { return }
+        (panel.contentView as! NativeImagePreviewContent).updateAnimationPlayback()
     }
 
     private func notifyClosed(_ closedURL: URL) {

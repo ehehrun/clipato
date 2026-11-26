@@ -253,7 +253,7 @@ final class SelectionToolbarTests: XCTestCase {
     }
 
     func testRecordingPickerReflectsInitialModeAndIsAbsentFromScreenshotToolbar() throws {
-        for mode in RecordingMode.allCases {
+        for mode in SelectionView.videoRecordingModes {
             let view = try makeView(mode: .recording, recordingMode: mode)
             let picker: NSSegmentedControl = try control("recording-mode-picker", in: view)
             XCTAssertEqual(view.recordingMode, mode)
@@ -261,7 +261,7 @@ final class SelectionToolbarTests: XCTestCase {
             XCTAssertEqual(picker.controlSize, .small)
             XCTAssertEqual(picker.frame.height, 28)
             XCTAssertLessThanOrEqual(picker.frame.width, 72)
-            for (index, segmentMode) in RecordingMode.allCases.enumerated() {
+            for (index, segmentMode) in SelectionView.videoRecordingModes.enumerated() {
                 XCTAssertEqual(picker.label(forSegment: index), "")
                 XCTAssertNotNil(picker.image(forSegment: index))
                 XCTAssertEqual(picker.toolTip(forSegment: index), segmentMode.toolbarTitle)
@@ -301,9 +301,9 @@ final class SelectionToolbarTests: XCTestCase {
             let tagPicker: NativeAssetTagPicker = try control("selection-tag-picker", in: view)
             XCTAssertEqual(tagPicker.accessibilityValue() as? String, AssetTag.purple.title, language.rawValue)
             XCTAssertEqual(tagPicker.frame.width, 46, language.rawValue)
-            XCTAssertEqual(picker.selectedSegment, RecordingMode.allCases.firstIndex(of: .video), language.rawValue)
+            XCTAssertEqual(picker.selectedSegment, SelectionView.videoRecordingModes.firstIndex(of: .video), language.rawValue)
             XCTAssertEqual(picker.accessibilityValue() as? String, RecordingMode.video.toolbarTitle, language.rawValue)
-            for (index, mode) in RecordingMode.allCases.enumerated() {
+            for (index, mode) in SelectionView.videoRecordingModes.enumerated() {
                 XCTAssertEqual(picker.label(forSegment: index), "", language.rawValue)
                 XCTAssertNotNil(picker.image(forSegment: index), language.rawValue)
                 XCTAssertEqual(picker.toolTip(forSegment: index), mode.toolbarTitle, language.rawValue)
@@ -329,7 +329,7 @@ final class SelectionToolbarTests: XCTestCase {
             finishedRegions.append(rect)
         }
 
-        picker.selectedSegment = RecordingMode.allCases.firstIndex(of: .video)!
+        picker.selectedSegment = SelectionView.videoRecordingModes.firstIndex(of: .video)!
         send(picker)
         XCTAssertEqual(changes, [.video])
         XCTAssertEqual(view.recordingMode, .video)
@@ -354,19 +354,19 @@ final class SelectionToolbarTests: XCTestCase {
         first.onRecordingModeChange = { mode in firstChanges += 1; second.setRecordingMode(mode) }
         second.onRecordingModeChange = { _ in secondChanges += 1 }
         let picker: NSSegmentedControl = try control("recording-mode-picker", in: first)
-        picker.selectedSegment = RecordingMode.allCases.firstIndex(of: .video)!
+        picker.selectedSegment = SelectionView.videoRecordingModes.firstIndex(of: .video)!
         send(picker)
 
         let secondPicker: NSSegmentedControl = try control("recording-mode-picker", in: second)
         XCTAssertEqual(firstChanges, 1)
         XCTAssertEqual(secondChanges, 0)
         XCTAssertEqual(second.recordingMode, .video)
-        XCTAssertEqual(secondPicker.selectedSegment, RecordingMode.allCases.firstIndex(of: .video))
+        XCTAssertEqual(secondPicker.selectedSegment, SelectionView.videoRecordingModes.firstIndex(of: .video))
         XCTAssertEqual(secondPicker.accessibilityValue() as? String, RecordingMode.video.toolbarTitle)
         XCTAssertEqual(second.selection, original)
         second.setRecordingMode(.keyframes)
         XCTAssertEqual(secondChanges, 0)
-        XCTAssertEqual(secondPicker.selectedSegment, RecordingMode.allCases.firstIndex(of: .keyframes))
+        XCTAssertEqual(secondPicker.selectedSegment, SelectionView.videoRecordingModes.firstIndex(of: .keyframes))
         XCTAssertEqual(secondPicker.accessibilityValue() as? String, RecordingMode.keyframes.toolbarTitle)
     }
 

@@ -15,7 +15,7 @@ struct ScreenshotResult {
 final class ScreenshotController: ObservableObject {
     @Published private(set) var pinnedMousePassthrough = false
     @Published private(set) var hasPinnedImages = false
-    private typealias Selection = (screen: NSScreen, image: CGImage, pixelRect: CGRect, annotations: [ImageAnnotation], action: ScreenshotAction, recordingMode: RecordingMode, tag: AssetTag?)
+    private typealias Selection = (screen: NSScreen, image: CGImage, pixelRect: CGRect, annotations: [ImageAnnotation], action: ScreenshotAction, recordingMode: RecordingMode, gifSettings: GIFRecordingSettings, tag: AssetTag?)
     private var isCapturing = false
     private var selectionRequestID: UUID?
     private var selectionCancelled = false
@@ -50,6 +50,13 @@ final class ScreenshotController: ObservableObject {
         return (region(for: selection), selection.tag)
     }
 
+    func selectGIFRecordingRegion(settings: GIFRecordingSettings = .init()) async throws -> (region: RecordingRegion, settings: GIFRecordingSettings)? {
+        try settings.validate()
+        guard let selection = try await selectRegion(displayID: nil, mode: .gifRecording, recordingMode: .gif,
+                                                     gifSettings: settings, allowsTagSelection: false) else { return nil }
+        return (region(for: selection), selection.gifSettings)
+    }
+
     private func region(for selection: Selection) -> RecordingRegion {
         let rect = CGRect(x: selection.pixelRect.minX * selection.screen.frame.width / CGFloat(selection.image.width),
                           y: selection.pixelRect.minY * selection.screen.frame.height / CGFloat(selection.image.height),
@@ -64,7 +71,7 @@ final class ScreenshotController: ObservableObject {
     }
 
     private func selectRegion(displayID: CGDirectDisplayID?, mode: SelectionView.Mode, initialFullScreen: Bool = false,
-                              recordingMode: RecordingMode = .keyframes, tag: AssetTag? = nil,
+                              recordingMode: RecordingMode = .keyframes, gifSettings: GIFRecordingSettings = .init(), tag: AssetTag? = nil,
                               allowsTagSelection: Bool = true) async throws -> Selection? {
         guard !isCapturing else { throw CaptureError.alreadyCapturing }
         guard !Task.isCancelled else { return nil }
@@ -99,7 +106,7 @@ final class ScreenshotController: ObservableObject {
                 switch mode {
                 case .screenshot, .fixedCapture:
                     excludedApplications = []
-                case .recording:
+                case .recording, .gifRecording:
                     excludedApplications = content.applications.filter {
                         $0.processID == ProcessInfo.processInfo.processIdentifier || $0.bundleIdentifier == Bundle.main.bundleIdentifier
                     }
@@ -132,7 +139,7 @@ final class ScreenshotController: ObservableObject {
                     window.isReleasedWhenClosed = false
                     window.acceptsMouseMovedEvents = true
                     let view = SelectionView(image: image, frame: CGRect(origin: .zero, size: screen.frame.size), mode: mode,
-                                             initialFullScreen: initialFullScreen, recordingMode: recordingMode,
+                                             initialFullScreen: initialFullScreen, recordingMode: recordingMode, gifSettings: gifSettings,
                                              tag: tag, allowsTagSelection: allowsTagSelection, windowTargets: windowTargets)
                     view.onRenderError = { [weak self] error in
                         guard let self, self.selectionRequestID == requestID else { return }
@@ -142,7 +149,8 @@ final class ScreenshotController: ObservableObject {
                     view.onFinish = { [weak self, weak view] rect, action in
                         guard let view else { return }
                         self?.finishSelection(rect.map { (screen: screen, image: image, pixelRect: $0, annotations: view.annotations,
-                                                         action: action, recordingMode: view.recordingMode, tag: view.assetTag) })
+                                                         action: action, recordingMode: view.recordingMode,
+                                                         gifSettings: view.gifSettings, tag: view.assetTag) })
                     }
                     window.contentView = view
                     selectionWindows = [window]
@@ -314,6 +322,11 @@ private extension NSScreen {
 final class SelectionWindow: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func becomeKey() {
+        super.becomeKey()
+        (contentView as? SelectionView)?.updateCursor(force: true)
+    }
 
     init(contentRect: CGRect) {
         super.init(contentRect: contentRect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)

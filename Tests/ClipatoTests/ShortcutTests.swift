@@ -10,7 +10,8 @@ final class ShortcutTests: XCTestCase {
         let manager = ShortcutManager(defaults: defaults)
         XCTAssertEqual(manager.bindings[.captureRegion]?.displayName, "F1")
         XCTAssertEqual(manager.bindings[.pinLatest]?.displayName, "F2")
-        XCTAssertEqual(manager.bindings[.toggleRecording]?.displayName, "F3")
+        XCTAssertEqual(manager.bindings[.toggleGIFRecording]?.displayName, "F3")
+        XCTAssertNil(manager.bindings[.toggleRecording])
         XCTAssertEqual(manager.bindings[.fixedCapture]?.displayName, "F4")
         XCTAssertEqual(manager.bindings[.togglePinnedMousePassthrough]?.displayName, "F5")
         XCTAssertNil(manager.bindings[.captureDisplay])
@@ -73,6 +74,8 @@ final class ShortcutTests: XCTestCase {
         try manager.restoreDefaults()
         XCTAssertFalse(manager.isEnabled)
         XCTAssertEqual(manager.bindings[.captureRegion]?.displayName, "F1")
+        XCTAssertEqual(manager.bindings[.toggleGIFRecording]?.displayName, "F3")
+        XCTAssertNil(manager.bindings[.toggleRecording])
         XCTAssertEqual(manager.bindings[.togglePinnedMousePassthrough]?.displayName, "F5")
         XCTAssertNil(manager.bindings[.captureDisplay])
     }
@@ -190,6 +193,110 @@ final class ShortcutTests: XCTestCase {
         defaults.set(try JSONEncoder().encode(original), forKey: "FrameVault.shortcuts")
         XCTAssertEqual(ShortcutManager(defaults: defaults).bindings, original)
         XCTAssertTrue(ShortcutManager(defaults: defaults).errors.isEmpty)
+    }
+
+    func testGIFMigrationMovesThePreviousRecordingShortcutToF3OnceWithoutEnablingShortcuts() throws {
+        let defaults = isolatedDefaults()
+        let original = [
+            ShortcutAction.captureRegion: try GlobalShortcut(keyCode: UInt32(kVK_F1), modifiers: 0),
+            .pinLatest: try GlobalShortcut(keyCode: UInt32(kVK_F2), modifiers: 0),
+            .toggleRecording: try GlobalShortcut(keyCode: UInt32(kVK_F3), modifiers: 0),
+        ]
+        defaults.set(try JSONEncoder().encode(original), forKey: "FrameVault.shortcuts")
+        defaults.set(true, forKey: "FrameVault.fixedCaptureShortcutAdded")
+        defaults.set(false, forKey: "FrameVault.shortcutsEnabled")
+
+        let manager = ShortcutManager(defaults: defaults)
+
+        XCTAssertNil(manager.bindings[.toggleRecording])
+        XCTAssertEqual(manager.bindings[.toggleGIFRecording], original[.toggleRecording])
+        XCTAssertEqual(manager.bindings[.captureRegion], original[.captureRegion])
+        XCTAssertEqual(manager.bindings[.pinLatest], original[.pinLatest])
+        XCTAssertFalse(manager.isEnabled)
+        XCTAssertTrue(manager.errors.isEmpty)
+        let stored = try JSONDecoder().decode([ShortcutAction: GlobalShortcut].self,
+            from: try XCTUnwrap(defaults.data(forKey: "FrameVault.shortcuts")))
+        XCTAssertEqual(stored, manager.bindings)
+
+        let customGIF = try GlobalShortcut(keyCode: UInt32(kVK_F19), modifiers: UInt32(optionKey))
+        let customRegion = try GlobalShortcut(keyCode: UInt32(kVK_F18), modifiers: UInt32(controlKey))
+        try manager.setShortcut(customGIF, for: .toggleGIFRecording)
+        try manager.setShortcut(customRegion, for: .toggleRecording)
+        let reopened = ShortcutManager(defaults: defaults)
+        XCTAssertEqual(reopened.bindings[.toggleGIFRecording], customGIF)
+        XCTAssertEqual(reopened.bindings[.toggleRecording], customRegion)
+        XCTAssertFalse(reopened.isEnabled)
+    }
+
+    func testGIFMigrationRemovesCustomRegionBindingWithoutReplacingAnExistingGIFBinding() throws {
+        let defaults = isolatedDefaults()
+        let original = [
+            ShortcutAction.toggleRecording: try GlobalShortcut(keyCode: UInt32(kVK_F8), modifiers: UInt32(cmdKey)),
+            .toggleGIFRecording: try GlobalShortcut(keyCode: UInt32(kVK_F12), modifiers: UInt32(optionKey)),
+            .captureRegion: try GlobalShortcut(keyCode: UInt32(kVK_F1), modifiers: 0),
+        ]
+        defaults.set(try JSONEncoder().encode(original), forKey: "FrameVault.shortcuts")
+        defaults.set(true, forKey: "FrameVault.fixedCaptureShortcutAdded")
+
+        let manager = ShortcutManager(defaults: defaults)
+
+        XCTAssertEqual(manager.bindings, original.filter { $0.key != .toggleRecording })
+        XCTAssertEqual(ShortcutManager(defaults: defaults).bindings, manager.bindings)
+        XCTAssertTrue(manager.errors.isEmpty)
+    }
+
+    func testGIFMigrationDoesNotStealF3FromAnotherAction() throws {
+        let defaults = isolatedDefaults()
+        let original = [
+            ShortcutAction.toggleRecording: try GlobalShortcut(keyCode: UInt32(kVK_F8), modifiers: 0),
+            .captureDisplay: try GlobalShortcut(keyCode: UInt32(kVK_F3), modifiers: 0),
+        ]
+        defaults.set(try JSONEncoder().encode(original), forKey: "FrameVault.shortcuts")
+        defaults.set(true, forKey: "FrameVault.fixedCaptureShortcutAdded")
+
+        let manager = ShortcutManager(defaults: defaults)
+
+        XCTAssertNil(manager.bindings[.toggleRecording])
+        XCTAssertNil(manager.bindings[.toggleGIFRecording])
+        XCTAssertEqual(manager.bindings[.captureDisplay], original[.captureDisplay])
+        XCTAssertTrue(manager.errors.isEmpty)
+    }
+
+    func testGIFMigrationPreservesEmptyAndAlreadyClearedRecordingConfigurations() throws {
+        let configurations: [[ShortcutAction: GlobalShortcut]] = [[:], [
+            .captureRegion: try GlobalShortcut(keyCode: UInt32(kVK_F1), modifiers: 0),
+        ]]
+        for original in configurations {
+            let defaults = isolatedDefaults()
+            let data = try JSONEncoder().encode(original)
+            defaults.set(data, forKey: "FrameVault.shortcuts")
+            defaults.set(true, forKey: "FrameVault.fixedCaptureShortcutAdded")
+
+            let manager = ShortcutManager(defaults: defaults)
+
+            XCTAssertEqual(manager.bindings, original)
+            XCTAssertNil(manager.bindings[.toggleGIFRecording])
+            XCTAssertEqual(defaults.data(forKey: "FrameVault.shortcuts"), data)
+            XCTAssertEqual(ShortcutManager(defaults: defaults).bindings, original)
+        }
+    }
+
+    func testFailedShortcutReadDoesNotPreventGIFMigrationAfterTheConfigurationIsRepaired() throws {
+        let defaults = isolatedDefaults()
+        defaults.set(Data("broken".utf8), forKey: "FrameVault.shortcuts")
+        defaults.set(true, forKey: "FrameVault.fixedCaptureShortcutAdded")
+        let corrupted = ShortcutManager(defaults: defaults)
+        XCTAssertTrue(corrupted.bindings.isEmpty)
+        XCTAssertFalse(defaults.bool(forKey: "FrameVault.gifRecordingShortcutMigrated"))
+        let original = [ShortcutAction.toggleRecording: try GlobalShortcut(keyCode: UInt32(kVK_F3), modifiers: 0)]
+        defaults.set(try JSONEncoder().encode(original), forKey: "FrameVault.shortcuts")
+
+        let repaired = ShortcutManager(defaults: defaults)
+
+        XCTAssertNil(repaired.bindings[.toggleRecording])
+        XCTAssertEqual(repaired.bindings[.toggleGIFRecording], original[.toggleRecording])
+        XCTAssertTrue(defaults.bool(forKey: "FrameVault.gifRecordingShortcutMigrated"))
+        XCTAssertTrue(repaired.errors.isEmpty)
     }
 
     private func isolatedDefaults() -> UserDefaults {

@@ -397,7 +397,7 @@ enum ClipatoCLI {
                 if options.help { try showHelp(command); return 0 }
                 try requireNoPaths(options)
                 let output = try outputURL(options, png: false)
-                guard let mode = RecordingMode(rawValue: options.values["mode"] ?? "keyframes") else {
+                guard let mode = RecordingMode(rawValue: options.values["mode"] ?? "keyframes"), mode != .gif else {
                     throw CLIError.arguments("--mode 必须为 video（MP4 视频）或 keyframes（关键帧）。")
                 }
                 let explicitDisplay = try displayID(options)

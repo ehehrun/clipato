@@ -83,7 +83,9 @@ struct SkillSettingsSection: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
+        panel.directoryURL = SavePanelDirectory.lastDirectory()
         guard panel.runModal() == .OK, let parent = panel.url else { return }
+        SavePanelDirectory.rememberDirectory(parent)
         install(to: parent.appendingPathComponent("clipato", isDirectory: true))
     }
 
